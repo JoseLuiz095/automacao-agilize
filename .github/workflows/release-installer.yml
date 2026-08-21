@@ -1,0 +1,143 @@
+name: Build and Publish Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSAO.txt
+      - .github/workflows/release-installer.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: automacao-agilize-release
+  cancel-in-progress: false
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Ler versao
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw VERSAO.txt).Trim()
+          if (-not $version) { throw 'VERSAO.txt esta vazio.' }
+          if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw "Versao invalida em VERSAO.txt: $version" }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RELEASE_TAG=v$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Versao que sera publicada: v$version"
+
+      - name: Instalar dependencias
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r build/requirements-build.txt
+
+      - name: Validar codigo
+        shell: pwsh
+        run: |
+          python tests/validar_projeto.py
+          python -m compileall -q app tests
+          Get-ChildItem tests\test_regressoes_v*.py | Sort-Object Name | ForEach-Object {
+            Write-Host "Executando $($_.Name)"
+            python $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Teste falhou: $($_.Name)" }
+          }
+
+      - name: Gerar metadados do EXE
+        shell: pwsh
+        run: python build/gerar_version_info.py
+
+      - name: Gerar aplicacao PyInstaller
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build/out/dist | Out-Null
+          New-Item -ItemType Directory -Force build/out/work | Out-Null
+          python -m PyInstaller --noconfirm --clean --distpath build/out/dist --workpath build/out/work build/AutomacaoAgilize.spec
+          if (-not (Test-Path 'build/out/dist/AutomacaoAgilize/AutomacaoAgilize.exe')) { throw 'EXE nao gerado.' }
+
+      - name: Instalar Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Compilar Setup.exe
+        shell: pwsh
+        run: |
+          $compiler = Get-ChildItem @(
+            "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup *\ISCC.exe"
+          ) -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $compiler) { throw 'ISCC.exe nao encontrado.' }
+          & $compiler.FullName "/DMyAppVersion=$env:APP_VERSION" 'installer\AutomacaoAgilize.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC falhou com codigo $LASTEXITCODE" }
+          if (-not (Test-Path 'installer/output/AutomacaoAgilize-Setup.exe')) { throw 'Setup.exe nao foi gerado.' }
+
+      - name: Gerar SHA-256
+        shell: pwsh
+        run: |
+          $file = 'installer/output/AutomacaoAgilize-Setup.exe'
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+          "$hash  AutomacaoAgilize-Setup.exe" | Set-Content 'installer/output/AutomacaoAgilize-Setup.exe.sha256' -Encoding ascii
+
+      - name: Guardar artefato do workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutomacaoAgilize-Setup-v${{ env.APP_VERSION }}
+          path: |
+            installer/output/AutomacaoAgilize-Setup.exe
+            installer/output/AutomacaoAgilize-Setup.exe.sha256
+          if-no-files-found: error
+
+      - name: Criar Release automaticamente e publicar instalador
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $title = "Automacao Agilize v$env:APP_VERSION"
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Criando Release $tag no commit $env:GITHUB_SHA"
+            gh release create $tag `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title $title `
+              --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "Nao foi possivel criar a Release $tag" }
+          } else {
+            Write-Host "Release $tag ja existe; atualizando assets."
+          }
+
+          gh release upload $tag `
+            'installer/output/AutomacaoAgilize-Setup.exe' `
+            'installer/output/AutomacaoAgilize-Setup.exe.sha256' `
+            --repo $env:GITHUB_REPOSITORY `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao publicar assets da Release $tag" }
+
+      - name: Confirmar canal instalavel
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $json = gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName,assets,url | ConvertFrom-Json
+          $names = @($json.assets | ForEach-Object { $_.name })
+          if ($names -notcontains 'AutomacaoAgilize-Setup.exe') { throw 'Release sem Setup.exe.' }
+          if ($names -notcontains 'AutomacaoAgilize-Setup.exe.sha256') { throw 'Release sem SHA-256.' }
+          Write-Host "Release pronta: $($json.url)"

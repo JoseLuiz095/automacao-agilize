@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.log
+.idea/
+.vscode/
+build/out/
+build/version_info.txt
+installer/output/*
+!installer/output/.gitkeep
+installer/gerar_instalador.log
+.DS_Store
