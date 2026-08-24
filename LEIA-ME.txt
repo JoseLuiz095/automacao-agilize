@@ -1,0 +1,22 @@
+AUTOMACAO AGILIZE
+=================
+
+USUARIO FINAL
+-------------
+Receba e execute somente:
+
+    AutomacaoAgilize-Setup.exe
+
+DESENVOLVIMENTO
+---------------
+Gerar instalador:
+
+    installer\GERAR_INSTALADOR_EXE.bat
+
+Ferramentas de manutencao:
+
+    FERRAMENTAS\
+
+Documentacao:
+
+    DOCUMENTACAO\

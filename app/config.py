@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import os
+import shutil
+from pathlib import Path
+
+PROD_AGILIZE_BASE_URL = "https://moveis-linhares.startinghub.com.br"
+APP_ENV = os.environ.get("AUTOMACAO_AGILIZE_ENV", "producao").strip().lower()
+AGILIZE_BASE_URL = os.environ.get("AGILIZE_BASE_URL", PROD_AGILIZE_BASE_URL).strip().rstrip("/")
+AGILIZE_URL = f"{AGILIZE_BASE_URL}/nfs"
+
+LOCAL_APPDATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))).expanduser().resolve()
+APP_HOME_NAME = "AutomacaoAgilize-Teste" if APP_ENV in {"teste", "test", "dev", "homologacao"} else "AutomacaoAgilize"
+APP_HOME = (LOCAL_APPDATA / APP_HOME_NAME).resolve()
+CONFIG_DIR = APP_HOME / "config"
+LOG_DIR = APP_HOME / "logs"
+PROFILE_BASE_DIR = APP_HOME / "browser-profiles"
+UPDATE_DIR = APP_HOME / "updates"
+CACHE_DIR = APP_HOME / "cache"
+TEMP_DIR = APP_HOME / "temp"
+
+# Compatibilidade com versoes anteriores.
+PROFILE_DIR = PROFILE_BASE_DIR / "edge"
+OLD_PROFILE_DIR = APP_HOME / "edge-profile"
+OLD_SETTINGS_FILE = APP_HOME / "settings.json"
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
+
+for folder in (APP_HOME, CONFIG_DIR, LOG_DIR, PROFILE_BASE_DIR, UPDATE_DIR, CACHE_DIR, TEMP_DIR):
+    folder.mkdir(parents=True, exist_ok=True)
+
+# Migracao silenciosa de dados de versoes 0.5.x.
+try:
+    if OLD_SETTINGS_FILE.exists() and not SETTINGS_FILE.exists():
+        shutil.copy2(OLD_SETTINGS_FILE, SETTINGS_FILE)
+except OSError:
+    pass
+
+try:
+    if OLD_PROFILE_DIR.exists() and not PROFILE_DIR.exists():
+        shutil.move(str(OLD_PROFILE_DIR), str(PROFILE_DIR))
+except OSError:
+    pass
+
+
+# Mapeamento obtido da tela /nfs do Agilize.
+# Chave: CNPJ da empresa/tomador. Valor: (company_id, nome exibido no Agilize)
+EMPRESAS = {
+    "33.712.750/0001-45": (30, "CM DISTRIBUIDORA LTDA (0001-45)"),
+    "33.712.750/0002-26": (31, "CM DISTRIBUIDORA LTDA (0002-26)"),
+    "12.367.359/0001-80": (34, "CONTISA - FRANQUIA E ASSESSORIA DE COBRANCA S/A"),
+    "09.081.947/0001-49": (8, "LCR COMERCIO DE MOVEIS LTDA (0001-49)"),
+    "09.081.947/0003-00": (9, "LCR COMERCIO DE MOVEIS LTDA (0003-00)"),
+    "09.081.947/0004-91": (10, "LCR COMERCIO DE MOVEIS LTDA (0004-91)"),
+    "09.081.947/0005-72": (11, "LCR COMERCIO DE MOVEIS LTDA (0005-72)"),
+    "09.081.947/0006-53": (12, "LCR COMERCIO DE MOVEIS LTDA (0006-53)"),
+    "09.081.947/0007-34": (13, "LCR COMERCIO DE MOVEIS LTDA (0007-34)"),
+    "09.081.947/0008-15": (14, "LCR COMERCIO DE MOVEIS LTDA (0008-15)"),
+    "09.081.947/0009-04": (4, "LCR COMERCIO DE MOVEIS LTDA (0009-04)"),
+    "09.081.947/0010-30": (15, "LCR COMERCIO DE MOVEIS LTDA (0010-30)"),
+    "09.081.947/0011-10": (16, "LCR COMERCIO DE MOVEIS LTDA (0011-10)"),
+    "09.081.947/0012-00": (3, "LCR COMERCIO DE MOVEIS LTDA (0012-00)"),
+    "09.081.947/0013-82": (17, "LCR COMERCIO DE MOVEIS LTDA (0013-82)"),
+    "09.081.947/0014-63": (18, "LCR COMERCIO DE MOVEIS LTDA (0014-63)"),
+    "09.081.947/0015-44": (19, "LCR COMERCIO DE MOVEIS LTDA (0015-44)"),
+    "09.081.947/0016-25": (20, "LCR COMERCIO DE MOVEIS LTDA (0016-25)"),
+    "09.081.947/0017-06": (21, "LCR COMERCIO DE MOVEIS LTDA (0017-06)"),
+    "09.081.947/0019-78": (22, "LCR COMERCIO DE MOVEIS LTDA (0019-78)"),
+    "09.081.947/0020-01": (23, "LCR COMERCIO DE MOVEIS LTDA (0020-01)"),
+    "09.081.947/0021-92": (7, "LCR COMERCIO DE MOVEIS LTDA (0021-92)"),
+    "09.081.947/0022-73": (24, "LCR COMERCIO DE MOVEIS LTDA (0022-73)"),
+    "09.081.947/0023-54": (25, "LCR COMERCIO DE MOVEIS LTDA (0023-54)"),
+    "09.081.947/0025-16": (27, "LCR COMERCIO DE MOVEIS LTDA (0025-16)"),
+    "09.081.947/0026-05": (28, "LCR COMERCIO DE MOVEIS LTDA (0026-05)"),
+    "09.081.947/0027-88": (36, "LCR COMERCIO DE MOVEIS LTDA (0027-88)"),
+    "09.081.947/0028-69": (37, "LCR COMERCIO DE MOVEIS LTDA (0028-69)"),
+    "23.448.429/0001-41": (2, "LEAO COMERCIO DE MOVEIS LTDA"),
+    "67.767.844/0001-33": (40, "LIN MONTAGEM E SERVICO LTDA"),
+    "12.579.337/0001-84": (5, "LINHARES LOG. E DIST. LTDA (0001-84)"),
+    "12.579.337/0002-65": (6, "LINHARES LOG. E DIST. LTDA (0002-65)"),
+    "12.579.337/0003-46": (38, "LINHARES LOG. E DIST. LTDA (0003-46)"),
+    "68.451.419/0001-01": (41, "MM MONTAGEM E SERVICO LTDA"),
+    "27.264.001/0001-08": (29, "MOVEIS LINHARES PARTICIPACOES LTDA"),
+    "28.498.686/0001-01": (35, "SENA INCORPORADORA E CONSTRUTORA LTDA"),
+    "27.938.966/0001-20": (32, "VEDA MOVEIS LTDA (0001-20)"),
+    "27.938.966/0002-01": (33, "VEDA MOVEIS LTDA (0002-01)"),
+    "27.938.966/0003-92": (39, "VEDA MOVEIS LTDA (0003-92)"),
+    "23.284.146/0001-01": (1, "WI COMERCIO ATACADISTA DE MOVEIS LTDA"),
+}
+
+# Apelidos de pagadores encontrados em boletos que nao exibem o CNPJ do tomador.
+# A chave e comparada sem acentos e em maiusculas. Esse mapa serve apenas para
+# identificar a empresa interna quando o proprio boleto omite o CNPJ.
+PAGADOR_EMPRESA_ALIASES = {
+    "LCR COMERCIO DE MOVEIS LTDA - CD EUNAPOLIS": "09.081.947/0027-88",
+    "LCR COM. DE MOVEIS LTDA - JAGUARE": "09.081.947/0008-15",
+    "LCR COM. DE MOVEIS LTDA - STª TERESA": "09.081.947/0007-34",
+    "LCR COM. DE MOVEIS LTDA - STA TERESA": "09.081.947/0007-34",
+    "LCR COMERCIO DE MOVEIS LTDA - JAGUARE": "09.081.947/0008-15",
+    "LCR COMERCIO DE MOVEIS LTDA - SANTA TERESA": "09.081.947/0007-34",
+    "WI COMERCIO ATACADISTA DE MOVEIS EIRELI - CD WI": "23.284.146/0001-01",
+    "WI COMERCIO ATACADISTA DE MOVEIS LTDA - CD WI": "23.284.146/0001-01",
+    "LEAO COMERCIO DE MOVEIS LTDA": "23.448.429/0001-41",
+}
+
+DEFAULT_OBSERVACAO = "- DADOS PARA PAGAMENTO:\n\n\n\n\n- ONDE FOI UTILIZADO ESTA COMPRA (RATEIO):"

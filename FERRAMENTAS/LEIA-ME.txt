@@ -1,0 +1,11 @@
+FERRAMENTAS - AUTOMACAO AGILIZE
+===============================
+
+01_EXECUTAR_DEV.bat       - executa o codigo fonte para desenvolvimento
+02_VALIDAR_PROJETO.bat    - valida estrutura, regras e testes de regressao
+03_ABRIR_DADOS_LOGS.bat   - abre os dados persistentes do usuario
+04_LIMPAR_BUILD.bat       - remove artefatos de compilacao
+05_GERAR_INSTALADOR.bat   - gera AutomacaoAgilize-Setup.exe
+06_CONFIGURAR_GITHUB.bat  - configura o remote origin
+07_PUBLICAR_VERSAO.bat    - atualiza VERSAO.txt, tag e dispara release
+08_TESTAR_ATUALIZACAO.bat - consulta Release/VERSAO.txt e mostra o retorno tecnico
