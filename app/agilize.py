@@ -216,6 +216,43 @@ def _linha_importada_prefixada_corresponde(cells: list[str], dados: NotaDados) -
     return True, ""
 
 
+def _linha_atual_confirmada(cells: list[str], dados: NotaDados) -> bool:
+    """Confirma identidade completa antes de reaproveitar registro de outra area.
+
+    Numero/sufixo sozinho nao basta. Nao altera a pontuacao historica usada na
+    pesquisa tradicional, mas impede redirecionar Contas a pagar para uma
+    NFS-e homonima de outro fornecedor, empresa ou competencia.
+    """
+    if len(cells) < 9 or not cells[4].strip():
+        return False
+    if not (dados.company_name or dados.company_cnpj):
+        return False
+    if not _linha_mesma_empresa(cells, dados):
+        return False
+    cnpj_empresa = re.sub(r"\D", "", dados.company_cnpj or "")
+    if len(cnpj_empresa) == 14:
+        filial = cnpj_empresa[-6:-2] + "-" + cnpj_empresa[-2:]
+        filial_linha = re.search(r"\((\d{4}-\d{2})\)", cells[4])
+        if filial_linha and filial_linha.group(1) != filial:
+            return False
+        if not dados.company_name and cnpj_empresa not in re.sub(r"\D", "", cells[4]) and filial not in cells[4]:
+            return False
+
+    cnpj = re.sub(r"\D", "", dados.provider_cnpj or "")
+    if not cnpj or cnpj != re.sub(r"\D", "", cells[5]):
+        return False
+    esperado = _normalizar_valor_centavos(dados.valor)
+    if esperado is None or esperado != _normalizar_valor_centavos(cells[2]):
+        return False
+    emissao = _data_br_iso(dados.emissao)
+    if not emissao or cells[3].strip() != emissao:
+        return False
+    return (
+        _normalizar_numero_nota(cells[1]) == _normalizar_numero_nota(dados.numero)
+        or _numero_nota_com_prefixo_indevido(cells[1], dados.numero)
+    )
+
+
 def _selecionar_status_nao_possui(page, logger: Optional[Logger] = None) -> bool:
     """Seleciona o status novo -1 / 'Nao possui' para localizar nota importada."""
     try:
@@ -1268,7 +1305,7 @@ def _periodo_busca_importada_por_fornecedor(emissao_iso: str, meses_anteriores: 
     except Exception:
         base = datetime.now()
 
-    meses_anteriores = max(1, int(meses_anteriores or 3))
+    meses_anteriores = max(2, int(meses_anteriores or 3))
     total_inicio = base.year * 12 + (base.month - 1) - meses_anteriores
     inicio_ano = total_inicio // 12
     inicio_mes = total_inicio % 12 + 1
@@ -1286,18 +1323,20 @@ def _selecionar_tipo_pesquisa(page, termos: tuple[str, ...]) -> bool:
             return False
         options = select.first.locator("option")
         termos_norm = tuple(_normalizar_texto(t) for t in termos if t)
-
-        # Prioriza os termos na ordem recebida. Isso impede que o fallback amplo
-        # "Documento" ganhe de "Documento fornecedor" apenas por aparecer antes
-        # na lista de options do Agilize.
-        for termo in termos_norm:
-            for i in range(options.count()):
-                opt = options.nth(i)
-                texto = _normalizar_texto(opt.inner_text())
-                if termo in texto:
-                    select.first.select_option(opt.get_attribute("value") or "")
-                    _aguardar_livewire(page, minimo_ms=350, timeout=4000)
-                    return True
+        # Rotulos exatos primeiro. "Fornecedor" nao pode selecionar
+        # "Documento fornecedor" ao pesquisar uma razao social.
+        for exato in (True, False):
+            for termo in termos_norm:
+                for i in range(options.count()):
+                    opt = options.nth(i)
+                    texto = _normalizar_texto(opt.inner_text())
+                    if termo in ("fornecedor", "nome") and any(t in texto for t in ("documento", "cnpj")):
+                        continue
+                    corresponde = (texto == termo) if exato else (termo in texto)
+                    if corresponde:
+                        select.first.select_option(opt.get_attribute("value") or "")
+                        _aguardar_livewire(page, minimo_ms=350, timeout=4000)
+                        return True
     except Exception:
         return False
     return False
@@ -1317,7 +1356,7 @@ def _coletar_linhas_importada_prefixada(page, dados: NotaDados):
     return candidatos
 
 
-def _localizar_importada_prefixada_por_fornecedor(page, dados: NotaDados, logger: Optional[Logger]):
+def _localizar_importada_prefixada_por_fornecedor(page, dados: NotaDados, logger: Optional[Logger], estrito: bool = False):
     """Fallback anti-duplicidade para numero importado incorretamente pelo Agilize.
 
     Pesquisa o fornecedor em NFS-E com um periodo que inclui o mes atual e so
@@ -1333,7 +1372,8 @@ def _localizar_importada_prefixada_por_fornecedor(page, dados: NotaDados, logger
         "Tentando localizar pre-cadastro do fornecedor com possivel prefixo indevido no numero...",
     )
     _garantir_lista_nfs(page)
-    _selecionar_status_todos(page, logger)
+    if not _selecionar_status_todos(page, logger):
+        raise RuntimeError("Todos os status nao puderam ser selecionados em NFS-E. Por seguranca, nenhum novo lancamento foi criado.")
     _selecionar_empresa_por_dados(
         page, dados, ["#underline_select", r"select[wire\:model*='company']"],
         logger, "fallback por fornecedor da nota atual",
@@ -1346,37 +1386,34 @@ def _localizar_importada_prefixada_por_fornecedor(page, dados: NotaDados, logger
     if dados.provider_name:
         tentativas.append(("NOME", ("Nome fornecedor", "Fornecedor", "Pesquisar tudo", "Tudo"), dados.provider_name.strip()))
 
+    pesquisas_concluidas = 0
     for rotulo, tipos, valor_busca in tentativas:
         if not valor_busca:
             continue
         selecionou = _selecionar_tipo_pesquisa(page, tipos)
-        if not selecionou and rotulo == "NOME":
-            # Em algumas versoes da tela, a opcao geral aparece sem um tipo
-            # especifico de nome. Mantemos o valor textual no campo de busca.
-            _log(logger, "Fallback da nota atual: filtro especifico por nome nao encontrado; usando a busca geral disponivel.")
-
-        # Data sempre por ultimo: trocas de empresa/status/tipo podem fazer o
-        # Livewire restaurar o periodo padrao. Aqui o mes atual e obrigatorio.
-        _aplicar_periodo_lista(page, inicio, fim)
-        _aguardar_livewire(page, minimo_ms=1550, timeout=7000)
-        try:
-            page.locator("#searchInput").fill(valor_busca)
-        except Exception:
+        if not selecionou:
+            _log(logger, f"Notas NFS-E: tipo de pesquisa por {rotulo} indisponivel; tentando a proxima opcao.")
             continue
-        _aguardar_pesquisa_livewire(page, minimo_ms=1800, timeout=7500)
 
+        # A pesquisa tambem pode restaurar o periodo. Preenche o termo antes
+        # das datas e so consulta as linhas apos confirmar ambos na tela.
+        _pesquisar_lista_com_periodo(page, valor_busca, inicio, fim, logger)
+        pesquisas_concluidas += 1
+        _log(logger, f"Notas NFS-E: pesquisa por {rotulo} = '{valor_busca}', periodo confirmado {inicio} ate {fim}.")
         candidatos = _coletar_linhas_importada_prefixada(page, dados)
+        if estrito:
+            candidatos = [(idx, cells) for idx, cells in candidatos if _linha_atual_confirmada(cells, dados)]
         if not candidatos:
             continue
+        if len(candidatos) > 1:
+            raise RuntimeError(
+                f"Mais de um pre-cadastro compativel com a nota {dados.numero} foi encontrado em NFS-E. "
+                "Confira os registros manualmente. Por seguranca, nenhum novo lancamento foi criado."
+            )
 
-        # Se houver duplicidade do proprio pre-cadastro, escolhe o numero com
-        # menor prefixo extra; os demais dados ja foram validados estritamente.
-        candidatos.sort(key=lambda item: (len(_normalizar_numero_nota(item[1][1])), item[0]))
         idx, cells = candidatos[0]
         numero_cadastrado = cells[1] if len(cells) > 1 else ""
         situacao = cells[8] if len(cells) > 8 else ""
-        if len(candidatos) > 1:
-            _log(logger, f"Fallback por fornecedor encontrou {len(candidatos)} linhas compativeis; usando o numero com menor prefixo extra: {numero_cadastrado}.")
         _log(
             logger,
             f"Registro atual localizado pelo fornecedor ({rotulo}) entre {inicio} e {fim}: "
@@ -1393,6 +1430,12 @@ def _localizar_importada_prefixada_por_fornecedor(page, dados: NotaDados, logger
             "match_prefixado": True,
         }
 
+    if not pesquisas_concluidas:
+        raise RuntimeError(
+            "Nao foi possivel concluir a pesquisa por fornecedor em Notas NFS-E. "
+            "Por seguranca, nenhum novo lancamento foi criado."
+        )
+
     _log(
         logger,
         f"Fallback por fornecedor nao encontrou pre-cadastro compativel da nota {dados.numero} entre {inicio} e {fim}.",
@@ -1400,19 +1443,76 @@ def _localizar_importada_prefixada_por_fornecedor(page, dados: NotaDados, logger
     return None
 
 
-def _aplicar_periodo_lista(page, inicio: str, fim: str) -> None:
-    try:
-        campo_ini = _primeiro_visivel(page, [r'input[wire\:model\.debounce\.1000ms="filter.dateStart"]', r'input[wire\:model*="dateStart"]'])
-        campo_fim = _primeiro_visivel(page, [r'input[wire\:model\.debounce\.1000ms="filter.dateEnd"]', r'input[wire\:model*="dateEnd"]'])
-        if campo_ini is not None:
-            campo_ini.fill(inicio)
-        if campo_fim is not None:
-            campo_fim.fill(fim)
-    except Exception:
-        pass
+def _campos_periodo_lista(page):
+    """Resolve novamente os locators a cada tentativa, pois a tela e reativa."""
+    campo_ini = _primeiro_visivel(page, [
+        r'input[wire\:model\.debounce\.1000ms="filter.dateStart"]',
+        r'input[wire\:model*="dateStart"]', r'input[wire\:model*="startDate"]',
+    ])
+    campo_fim = _primeiro_visivel(page, [
+        r'input[wire\:model\.debounce\.1000ms="filter.dateEnd"]',
+        r'input[wire\:model*="dateEnd"]', r'input[wire\:model*="endDate"]',
+    ])
+    # Mesmo fallback ja utilizado pela pesquisa historica, sem supor novos IDs.
+    dates = page.locator('input[type="date"]:visible')
+    if dates.count() >= 2:
+        if campo_ini is None:
+            campo_ini = dates.nth(0)
+        if campo_fim is None:
+            campo_fim = dates.nth(1)
+    if campo_ini is None or campo_fim is None:
+        raise RuntimeError("Os dois campos de data da lista nao foram localizados.")
+    return campo_ini, campo_fim
 
 
-def _coletar_linhas_mesmo_numero(page, dados: NotaDados) -> list[tuple[int, int, list[str], list[str]]]:
+def _aplicar_periodo_lista(page, inicio: str, fim: str, logger: Optional[Logger] = None, contexto: str = "Notas NFS-E") -> None:
+    """Preenche, espera o debounce e confirma o intervalo efetivo; nunca falha em silencio."""
+    if datetime.strptime(inicio, "%Y-%m-%d") > datetime.strptime(fim, "%Y-%m-%d"):
+        raise ValueError("Data inicial maior que a data final da pesquisa.")
+    ultimo_erro = ""
+    for tentativa in range(1, 4):
+        try:
+            campo_ini, campo_fim = _campos_periodo_lista(page)
+            if campo_ini.input_value().strip() != inicio:
+                campo_ini.fill(inicio)
+                campo_ini.press("Tab")
+            # O preenchimento do inicio pode reconstruir o outro campo.
+            _, campo_fim = _campos_periodo_lista(page)
+            if campo_fim.input_value().strip() != fim:
+                campo_fim.fill(fim)
+                campo_fim.press("Tab")
+            _aguardar_pesquisa_livewire(page, minimo_ms=1800, timeout=7500)
+            campo_ini, campo_fim = _campos_periodo_lista(page)
+            atual_inicio = campo_ini.input_value().strip()
+            atual_fim = campo_fim.input_value().strip()
+            if atual_inicio == inicio and atual_fim == fim:
+                _log(logger, f"{contexto}: datas confirmadas na tela = {atual_inicio} ate {atual_fim}.")
+                return
+            ultimo_erro = f"a tela manteve {atual_inicio} ate {atual_fim}"
+        except Exception as exc:
+            ultimo_erro = str(exc)
+        _log(logger, f"{contexto}: periodo nao confirmado ({tentativa}/3); reaplicando {inicio} ate {fim}.")
+    raise RuntimeError(
+        f"{contexto}: nao foi possivel confirmar o periodo {inicio} ate {fim}: {ultimo_erro}. "
+        "Pesquisa inconclusiva. Por seguranca, nenhum novo lancamento foi criado."
+    )
+
+
+def _pesquisar_lista_com_periodo(page, valor: str, inicio: str, fim: str, logger: Optional[Logger] = None, contexto: str = "Notas NFS-E") -> None:
+    """Texto e datas devem pertencer a mesma consulta, apos as reconstrucoes da tela."""
+    for _ in range(2):
+        page.locator("#searchInput").fill(str(valor))
+        _aguardar_livewire(page, minimo_ms=1550, timeout=7000)
+        _aplicar_periodo_lista(page, inicio, fim, logger, contexto)
+        if page.locator("#searchInput").input_value().strip() == str(valor).strip():
+            return
+    raise RuntimeError(
+        f"{contexto}: o texto de pesquisa nao permaneceu preenchido. "
+        "Por seguranca, nenhum novo lancamento foi criado."
+    )
+
+
+def _coletar_linhas_mesmo_numero(page, dados: NotaDados, estrito: bool = False) -> list[tuple[int, int, list[str], list[str]]]:
     candidatos: list[tuple[int, int, list[str], list[str]]] = []
     rows = page.locator("tbody tr")
     for i in range(rows.count()):
@@ -1421,13 +1521,15 @@ def _coletar_linhas_mesmo_numero(page, dados: NotaDados) -> list[tuple[int, int,
             cells = [x.strip() for x in row.locator("th, td").all_inner_texts()]
         except Exception:
             continue
+        if estrito and not _linha_atual_confirmada(cells, dados):
+            continue
         score, motivos = _score_linha_mesmo_numero(cells, dados)
         if score >= 0:
             candidatos.append((score, i, cells, motivos))
     return candidatos
 
 
-def _localizar_registro_existente(page, dados: NotaDados, logger: Optional[Logger], log_header: bool = True):
+def _localizar_registro_existente(page, dados: NotaDados, logger: Optional[Logger], log_header: bool = True, estrito: bool = False):
     """Pesquisa exaustivamente o mesmo numero sem abrir o modal.
 
     Retorna o melhor candidato ou None. A busca continua usando todos os status,
@@ -1440,44 +1542,36 @@ def _localizar_registro_existente(page, dados: NotaDados, logger: Optional[Logge
     if log_header:
         _log(logger, f"Verificando se a nota {dados.numero} ja possui qualquer registro no Agilize antes de criar um novo...")
 
-    try:
-        page.locator("#searchType").select_option(label="Número")
-    except Exception:
-        try:
-            page.locator("#searchType").select_option(label="Numero")
-        except Exception:
-            pass
-    _selecionar_status_todos(page, logger)
+    if not _selecionar_tipo_pesquisa(page, ("Numero", "Pesquisar tudo", "Tudo")):
+        raise RuntimeError("Filtro de pesquisa da NFS-e nao localizado. Por seguranca, nenhum novo lancamento foi criado.")
+    if not _selecionar_status_todos(page, logger):
+        raise RuntimeError("Todos os status nao puderam ser selecionados em NFS-E. Por seguranca, nenhum novo lancamento foi criado.")
 
     _selecionar_empresa_por_dados(
         page, dados, ["#underline_select", r"select[wire\:model*='company']"],
         logger, "pesquisa do registro existente",
     )
-    inicio, fim = _periodo_mes_da_nota(dados.emissao)
-    _aplicar_periodo_lista(page, inicio, fim)
-    page.locator("#searchInput").fill(str(dados.numero))
-    _aguardar_pesquisa_livewire(page, minimo_ms=1750, timeout=7000)
-    candidatos = _coletar_linhas_mesmo_numero(page, dados)
+    inicio, fim = _periodo_busca_importada_por_fornecedor(dados.emissao)
+    _log(logger, f"Notas NFS-E: periodo inicial de verificacao = {inicio} ate {fim} (mes da nota + 3 meses anteriores).")
+    _pesquisar_lista_com_periodo(page, str(dados.numero), inicio, fim, logger)
+    candidatos = _coletar_linhas_mesmo_numero(page, dados, estrito=estrito)
 
     if not candidatos:
         inicio_amplo, fim_amplo = _periodo_busca_ampla(dados.emissao)
-        _log(logger, f"Nota {dados.numero} nao apareceu no mes da emissao; ampliando o periodo para {inicio_amplo} ate {fim_amplo}.")
-        _aplicar_periodo_lista(page, inicio_amplo, fim_amplo)
-        page.locator("#searchInput").fill(str(dados.numero))
-        _aguardar_pesquisa_livewire(page, minimo_ms=1750, timeout=7000)
-        candidatos = _coletar_linhas_mesmo_numero(page, dados)
+        _log(logger, f"Nota {dados.numero} nao apareceu no periodo inicial; ampliando o periodo para {inicio_amplo} ate {fim_amplo}.")
+        _pesquisar_lista_com_periodo(page, str(dados.numero), inicio_amplo, fim_amplo, logger)
+        candidatos = _coletar_linhas_mesmo_numero(page, dados, estrito=estrito)
 
     if not candidatos:
         _selecionar_todas_empresas(page, logger)
         inicio_amplo, fim_amplo = _periodo_busca_ampla(dados.emissao)
-        _aplicar_periodo_lista(page, inicio_amplo, fim_amplo)
-        page.locator("#searchInput").fill(str(dados.numero))
-        _aguardar_pesquisa_livewire(page, minimo_ms=1750, timeout=7000)
-        candidatos = _coletar_linhas_mesmo_numero(page, dados)
+        _pesquisar_lista_com_periodo(page, str(dados.numero), inicio_amplo, fim_amplo, logger)
+        candidatos = _coletar_linhas_mesmo_numero(page, dados, estrito=estrito)
 
     if not candidatos:
-        prefixado = _localizar_importada_prefixada_por_fornecedor(page, dados, logger)
+        prefixado = _localizar_importada_prefixada_por_fornecedor(page, dados, logger, estrito=estrito)
         if prefixado:
+            prefixado["estrito"] = estrito
             return prefixado
 
         _log(
@@ -1487,6 +1581,8 @@ def _localizar_registro_existente(page, dados: NotaDados, logger: Optional[Logge
         )
         return None
 
+    if estrito and len(candidatos) > 1:
+        raise RuntimeError("Mais de uma NFS-e compativel foi encontrada. Por seguranca, nenhum novo lancamento foi criado.")
     candidatos.sort(key=lambda item: item[0], reverse=True)
     score, idx, cells, motivos = candidatos[0]
     situacao = cells[8] if len(cells) > 8 else ""
@@ -1502,7 +1598,7 @@ def _localizar_registro_existente(page, dados: NotaDados, logger: Optional[Logge
             "O registro existente possui divergencias secundarias, mas o numero da nota ja existe e sera reutilizado: "
             + "; ".join(motivos) + ".",
         )
-    return {"score": score, "idx": idx, "cells": cells, "motivos": motivos, "situacao": situacao}
+    return {"score": score, "idx": idx, "cells": cells, "motivos": motivos, "situacao": situacao, "estrito": estrito}
 
 
 def _buscar_e_abrir_importada_atual(page, dados: NotaDados, logger: Optional[Logger], precheck=...):
@@ -1538,13 +1634,16 @@ def _buscar_e_abrir_importada_atual(page, dados: NotaDados, logger: Optional[Log
     # Se o precheck veio de uma pesquisa anterior, a pagina pode ter sido usada
     # para consultar o historico. Refaz apenas a localizacao do registro atual.
     if precheck is not ...:
-        registro = _localizar_registro_existente(page, dados, logger, log_header=False)
+        registro = _localizar_registro_existente(page, dados, logger, log_header=False, estrito=bool(precheck.get("estrito")))
         if not registro:
             raise RuntimeError(
                 f"A nota {dados.numero} foi localizada no pre-check, mas desapareceu ao reabrir a lista. "
                 "Por seguranca, nenhum novo lancamento foi criado."
             )
         situacao = str(registro.get("situacao") or "")
+        if _status_ja_processado(situacao):
+            _log(logger, f"Registro passou para '{situacao}' durante a pesquisa; nao sera preenchido novamente.")
+            return {"existe": True, "aberto": False, "ja_processado": True, "situacao": situacao}
 
     rows = page.locator("tbody tr")
     row = rows.nth(int(registro["idx"]))
@@ -1557,18 +1656,18 @@ def _buscar_e_abrir_importada_atual(page, dados: NotaDados, logger: Optional[Log
         _selecionar_status_nao_possui(page, logger)
         if registro.get("match_prefixado"):
             inicio, fim = _periodo_busca_importada_por_fornecedor(dados.emissao)
-            _aplicar_periodo_lista(page, inicio, fim)
             numero_busca = str(registro.get("numero_cadastrado") or dados.numero)
-            page.locator("#searchInput").fill(numero_busca)
-            _aguardar_pesquisa_livewire(page, minimo_ms=1600, timeout=6500)
+            _selecionar_tipo_pesquisa(page, ("Numero", "Pesquisar tudo", "Tudo"))
+            _pesquisar_lista_com_periodo(page, numero_busca, inicio, fim, logger)
             candidatos_prefixados = _coletar_linhas_importada_prefixada(page, dados)
             if candidatos_prefixados:
                 idx, _cells = candidatos_prefixados[0]
                 abriu = _abrir_modal_edicao(page, page.locator("tbody tr").nth(idx), logger, timeout=12000)
         else:
-            page.locator("#searchInput").fill(str(dados.numero))
-            _aguardar_pesquisa_livewire(page, minimo_ms=1600, timeout=6500)
-            candidatos = _coletar_linhas_mesmo_numero(page, dados)
+            inicio, fim = _periodo_busca_importada_por_fornecedor(dados.emissao)
+            _selecionar_tipo_pesquisa(page, ("Numero", "Pesquisar tudo", "Tudo"))
+            _pesquisar_lista_com_periodo(page, str(dados.numero), inicio, fim, logger)
+            candidatos = _coletar_linhas_mesmo_numero(page, dados, estrito=bool(registro.get("estrito")))
             if candidatos:
                 candidatos.sort(key=lambda item: item[0], reverse=True)
                 _score, idx, _cells, _motivos = candidatos[0]

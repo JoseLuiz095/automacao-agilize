@@ -13,6 +13,9 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 from agilize import (
     _abrir_modal_edicao,
+    _aplicar_periodo_lista,
+    _pesquisar_lista_com_periodo,
+    _periodo_busca_importada_por_fornecedor,
     _aguardar_livewire,
     _aguardar_pesquisa_livewire,
     _fechar_modal_sem_salvar,
@@ -275,8 +278,8 @@ def _preencher_destino_documentos(page, dados: NotaDados, anexos_pdf: list[str],
             for label in ("Número", "Numero", "Documento"):
                 if _select_if_exists(page, "#searchType", label_contains=label):
                     break
-            search.first.fill(str(dados.numero))
-            _aguardar_pesquisa_livewire(page, minimo_ms=1600, timeout=6500)
+            inicio, fim = _periodo_busca_importada_por_fornecedor(dados.emissao)
+            _pesquisar_lista_com_periodo(page, str(dados.numero), inicio, fim, logger, tipo.label)
             rows = page.locator("tbody tr")
             for i in range(rows.count()):
                 row = rows.nth(i)
@@ -291,8 +294,14 @@ def _preencher_destino_documentos(page, dados: NotaDados, anexos_pdf: list[str],
                         _log(logger, f"Documento {dados.numero} existente localizado em {tipo.label}; complementando o registro.")
                         _preencher_campos_complementares(page, dados, anexos_pdf, logger, "documento existente")
                         return "documento_existente"
+                raise RuntimeError("Documento existente localizado, mas o formulario nao abriu; a criacao de outro foi bloqueada.")
+        else:
+            raise RuntimeError("Campo de pesquisa ou numero do documento indisponivel; verificacao inconclusiva.")
     except Exception as exc:
-        _log(logger, f"Pesquisa do documento atual em {tipo.label} nao concluiu: {exc}")
+        raise RuntimeError(
+            f"Pesquisa do documento atual em {tipo.label} nao concluiu: {exc}. "
+            "Por seguranca, nenhum novo lancamento foi criado."
+        ) from exc
 
     # 2) Se nao existe, tenta abrir um formulario novo na area correta.
     nomes = [
@@ -401,56 +410,9 @@ def _intervalo_historico(tipo_key: str, dados: NotaDados) -> tuple[str, str]:
 def _preencher_intervalo_historico(page, tipo_key: str, dados: NotaDados, logger: Optional[Logger]) -> tuple[str, str]:
     inicio, fim = _intervalo_historico(tipo_key, dados)
 
-    start_selectors = [
-        r'input[wire\:model\.debounce\.1000ms="filter.dateStart"]',
-        r'input[wire\:model*="dateStart"]',
-        r'input[wire\:model*="startDate"]',
-    ]
-    end_selectors = [
-        r'input[wire\:model\.debounce\.1000ms="filter.dateEnd"]',
-        r'input[wire\:model*="dateEnd"]',
-        r'input[wire\:model*="endDate"]',
-    ]
-
-    start_ok = _fill_if_exists(page, start_selectors, inicio)
-    end_ok = _fill_if_exists(page, end_selectors, fim)
-
-    # Fallback para telas que usam outro wire:model, mas mantem dois campos date.
-    if not (start_ok and end_ok):
-        try:
-            dates = page.locator('input[type="date"]:visible')
-            if dates.count() >= 2:
-                if not start_ok:
-                    dates.nth(0).fill(inicio)
-                    start_ok = True
-                if not end_ok:
-                    dates.nth(1).fill(fim)
-                    end_ok = True
-        except Exception:
-            pass
-
-    if start_ok or end_ok:
-        # Os campos usam debounce. Aguarda antes de preencher a pesquisa para nao
-        # consultar o fornecedor ainda com o filtro padrao do dia atual.
-        _aguardar_livewire(page, minimo_ms=1550, timeout=7000)
-
-    # Confere o que ficou efetivamente na tela para TODAS as areas. O Livewire
-    # pode reconstruir os inputs e restaurar a data padrao depois de empresa,
-    # status ou tipo de busca. Se isso ocorrer, reaplicamos uma vez.
-    try:
-        dates = page.locator('input[type="date"]:visible')
-        if dates.count() >= 2:
-            atual_inicio = dates.nth(0).input_value().strip()
-            atual_fim = dates.nth(1).input_value().strip()
-            if atual_inicio != inicio or atual_fim != fim:
-                dates.nth(0).fill(inicio)
-                dates.nth(1).fill(fim)
-                _aguardar_livewire(page, minimo_ms=1550, timeout=7000)
-                atual_inicio = dates.nth(0).input_value().strip()
-                atual_fim = dates.nth(1).input_value().strip()
-            _log(logger, f"{TIPOS[tipo_key].label}: datas confirmadas na tela = {atual_inicio} ate {atual_fim}.")
-    except Exception as exc:
-        _log(logger, f"{TIPOS[tipo_key].label}: nao foi possivel confirmar visualmente os campos de data: {exc}")
+    # _aplicar_periodo_lista registra as datas confirmadas na tela e bloqueia
+    # a preparacao se o Livewire insistir em restaurar o periodo padrao.
+    _aplicar_periodo_lista(page, inicio, fim, logger, TIPOS[tipo_key].label + " - historico")
 
     if tipo_key == "documentos":
         _log(logger, f"{TIPOS[tipo_key].label}: periodo de pesquisa ajustado para {inicio} ate {fim} (ultimos 2 meses).")
@@ -558,6 +520,10 @@ def _buscar_em_tipo(page, dados: NotaDados, tipo_key: str, logger: Optional[Logg
             _aguardar_pesquisa_livewire(page, minimo_ms=1650, timeout=7000)
         _log(logger, f"{tipo.label}: campo Buscar confirmado com o nome '{valor_busca}'.")
 
+    _aplicar_periodo_lista(page, inicio, fim, logger, tipo.label + " - historico")
+    if page.locator("#searchInput").input_value().strip() != str(valor_busca).strip():
+        raise RuntimeError("Texto da pesquisa historica nao confirmado. Por seguranca, nenhum novo lancamento foi criado.")
+
     rows = page.locator("tbody tr")
     candidatos: list[tuple[datetime, int, str, str]] = []
     provider_digits = _digits(dados.provider_cnpj)
@@ -664,7 +630,7 @@ def buscar_referencia_multitipo(page, dados: NotaDados, preferido: str, sugerido
     if primeiro_registro:
         _log(logger, "Fornecedor localizado no historico, porem sem observacao/aprovador reutilizavel nas telas mapeadas.")
         return primeiro_registro
-    _log(logger, "Nenhum registro anterior encontrado em Notas NFS-E ou Doc. - Contas a pagar.")
+    _log(logger, "Nenhum registro anterior encontrado nas areas pesquisadas: " + ", ".join(t.label for t in ordem) + ".")
     return None
 
 
@@ -855,13 +821,16 @@ class AgilizeSession:
         destino = resolver_tipo_destino(tipo_preferido, tipo_sugerido, dados)
         _log(self.logger, f"Destino resolvido antes da pesquisa historica: {TIPOS[destino].label}.")
 
-        # v0.9.8: antes de gastar tempo procurando observacao do mes anterior,
-        # verifica a nota atual. Se ela ja estiver Aguardando Aprovacao/Efetuada,
-        # o trabalho terminou e a fila pode seguir imediatamente.
-        precheck = ...
-        if destino == "nfse":
-            precheck = _localizar_registro_existente(page, dados, self.logger)
-            if precheck and _status_ja_processado(str(precheck.get("situacao") or "")):
+        # Anti-duplicidade nao depende do destino sugerido, nem do cache de
+        # historico. Um boleto classificado como documentos pode acompanhar uma
+        # NFS-e ja importada. Apenas correspondencia completa autoriza redirecionar.
+        _log(self.logger, "Verificacao obrigatoria de pre-lancamento em Notas NFS-E, independente do destino sugerido.")
+        precheck = _localizar_registro_existente(page, dados, self.logger, estrito=(destino != "nfse"))
+        if precheck:
+            if destino != "nfse":
+                destino = "nfse"
+                _log(self.logger, "Pre-lancamento correspondente confirmado em Notas NFS-E; reutilizando o registro existente, sem criar em Contas a pagar.")
+            if _status_ja_processado(str(precheck.get("situacao") or "")):
                 situacao = str(precheck.get("situacao") or "")
                 _log(
                     self.logger,
@@ -881,15 +850,21 @@ class AgilizeSession:
             destino,
             re.sub(r"\D", "", dados.provider_cnpj or "") or (dados.provider_name or dados.beneficiario_nome or "").strip().lower(),
             re.sub(r"\D", "", dados.company_cnpj or "") or str(dados.company_id or "") or (dados.company_name or "").strip().lower(),
-            inicio_hist[:7],
+            inicio_hist,
+            _fim_hist,
         )
-        if cache_key in self._historico_cache:
-            referencia = self._historico_cache[cache_key]
-            if referencia:
-                _log(self.logger, f"Referencia historica reutilizada em cache: {referencia.get('tipo_label')} {referencia.get('numero') or ''}".strip())
+        referencia = self._historico_cache.get(cache_key)
+        if referencia:
+            _log(self.logger, f"Referencia historica reutilizada em cache: {referencia.get('tipo_label')} {referencia.get('numero') or ''}".strip())
         else:
+            # Resultado vazio nao e prova de inexistencia e nao pode impedir
+            # uma nova tentativa apos o usuario ajustar um pre-cadastro.
             referencia = buscar_referencia_multitipo(page, dados, destino, destino, self.logger)
-            self._historico_cache[cache_key] = referencia
+            if referencia:
+                self._historico_cache[cache_key] = referencia
+            else:
+                self._historico_cache.pop(cache_key, None)
+                _log(self.logger, "Historico sem resultado: nao armazenado em cache; sera pesquisado novamente na proxima tentativa.")
 
         tipo_pagamento = dados.pagamento_tipo or "BOLETO"
         if referencia:
