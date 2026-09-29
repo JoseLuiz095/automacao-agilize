@@ -19,6 +19,17 @@ class Credenciais:
     navegador: str = "auto"
 
 
+@dataclass
+class CredenciaisZimbra:
+    email: str = ""
+    senha: str = ""
+    servidor: str = ""
+    porta: int = 993
+    pasta: str = "INBOX"
+    remetente: str = ""
+    destino: str = ""
+
+
 class DATA_BLOB(ctypes.Structure):
     _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
 
@@ -107,12 +118,14 @@ def salvar_credenciais(email: str, senha: str, login_automatico: bool = True, na
         raise ValueError("Informe o e-mail do Agilize.")
     if not senha:
         raise ValueError("Informe a senha do Agilize.")
-    _salvar_settings({
+    settings = _ler_settings()
+    settings.update({
         "email": email,
         "login_automatico": bool(login_automatico),
         "navegador": (navegador or "auto").strip().lower(),
         "senha_protegida": _dpapi_encrypt(senha),
     })
+    _salvar_settings(settings)
 
 
 def salvar_navegador(navegador: str) -> None:
@@ -123,10 +136,56 @@ def salvar_navegador(navegador: str) -> None:
 
 def remover_credenciais() -> None:
     settings = _ler_settings()
-    navegador = str(settings.get("navegador", "auto") or "auto")
-    _salvar_settings({
+    settings.update({
         "email": "",
         "login_automatico": True,
-        "navegador": navegador,
+        "navegador": str(settings.get("navegador", "auto") or "auto"),
         "senha_protegida": "",
     })
+    _salvar_settings(settings)
+
+
+def carregar_credenciais_zimbra() -> CredenciaisZimbra:
+    settings = _ler_settings()
+    z = settings.get("zimbra", {}) if isinstance(settings.get("zimbra", {}), dict) else {}
+    email = str(z.get("email", "") or "").strip()
+    servidor = str(z.get("servidor", "") or "").strip()
+    pasta = str(z.get("pasta", "INBOX") or "INBOX").strip()
+    remetente = str(z.get("remetente", "") or "").strip()
+    destino = str(z.get("destino", "") or "").strip()
+    try:
+        porta = int(z.get("porta", 993) or 993)
+    except Exception:
+        porta = 993
+    try:
+        senha = _dpapi_decrypt(str(z.get("senha_protegida", "") or ""))
+    except Exception:
+        senha = ""
+    return CredenciaisZimbra(email, senha, servidor, porta, pasta, remetente, destino)
+
+
+def salvar_credenciais_zimbra(
+    email: str,
+    senha: str,
+    servidor: str = "",
+    porta: int = 993,
+    pasta: str = "INBOX",
+    remetente: str = "",
+    destino: str = "",
+) -> None:
+    email = (email or "").strip()
+    if not email:
+        raise ValueError("Informe o e-mail do Zimbra.")
+    if not senha:
+        raise ValueError("Informe a senha do Zimbra.")
+    settings = _ler_settings()
+    settings["zimbra"] = {
+        "email": email,
+        "servidor": (servidor or "").strip(),
+        "porta": int(porta or 993),
+        "pasta": (pasta or "INBOX").strip(),
+        "remetente": (remetente or "").strip(),
+        "destino": (destino or "").strip(),
+        "senha_protegida": _dpapi_encrypt(senha),
+    }
+    _salvar_settings(settings)

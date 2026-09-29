@@ -419,16 +419,50 @@ def classificar_pdfs(paths: list[str | Path]) -> tuple[Path, Path]:
     return nota.path, pagamento.path
 
 
+def _nome_empresa_proximo_cnpj(texto: str, cnpj: str, inicio: int = 0, fim: int | None = None) -> str:
+    """Tenta obter o nome do tomador/cliente perto de um CNPJ ainda nao mapeado.
+
+    O cadastro estatico de empresas continua sendo a fonte preferida para obter o
+    ``company_id`` do Agilize, mas novos estabelecimentos podem aparecer antes de
+    uma nova versao da automacao. Nesses casos preservamos ao menos CNPJ/nome para
+    pareamento dos PDFs e depois tentamos resolver o ID pelo proprio select da tela.
+    """
+    trecho = texto[inicio:fim] if fim is not None else texto[inicio:]
+    linhas = _linhas(trecho)
+    digits = re.sub(r"\D", "", cnpj or "")
+    for i, linha in enumerate(linhas):
+        if cnpj not in linha and digits not in re.sub(r"\D", "", linha):
+            continue
+        for j in range(i - 1, max(-1, i - 12), -1):
+            cand = linhas[j].strip()
+            if _parece_nome_empresa(cand):
+                return cand[:180]
+    return ""
+
+
 def _achar_empresa_interna(texto: str):
-    # Preferencia explicita pelo bloco TOMADOR/ADQUIRENTE do DANFSe.
+    # Preferencia explicita pelos blocos que representam o TOMADOR/CLIENTE.
+    # Nao exigimos que o CNPJ ja exista no mapa local para conseguir parear PDFs
+    # de uma filial nova; o ID pode ser resolvido depois pelo select do Agilize.
     upper = sem_acento(texto).upper()
-    pos = upper.find("TOMADOR / ADQUIRENTE")
-    if pos >= 0:
-        trecho = texto[pos:pos + 2200]
-        for cnpj in _todos_cnpjs(trecho):
+    for marcador, alcance in (("TOMADOR / ADQUIRENTE", 2400), ("CLIENTE:", 1800)):
+        pos = upper.find(marcador)
+        if pos < 0:
+            continue
+        trecho = texto[pos:pos + alcance]
+        cnpjs = _todos_cnpjs(trecho)
+        # Se ha empresa ja conhecida no bloco, ela continua tendo prioridade.
+        for cnpj in cnpjs:
             if cnpj in EMPRESAS:
                 company_id, company_name = EMPRESAS[cnpj]
                 return cnpj, company_id, company_name
+        # Em TOMADOR/CLIENTE o primeiro CNPJ e, em geral, o proprio tomador.
+        # Isso evita confundir o CNPJ do cliente com o fornecedor em recibos que
+        # trazem boleto + NFS-e no mesmo PDF.
+        if cnpjs:
+            cnpj = cnpjs[0]
+            nome = _nome_empresa_proximo_cnpj(texto, cnpj, pos, pos + alcance)
+            return cnpj, None, nome
 
     for cnpj in _todos_cnpjs(texto):
         if cnpj in EMPRESAS:

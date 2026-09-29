@@ -38,6 +38,7 @@ def main() -> int:
     import batch  # noqa: F401
     import tipos_agilize  # noqa: F401
     import updater  # noqa: F401
+    import zimbra_mail  # noqa: F401
     import resources  # noqa: F401
     from observacao import extrair_rateio, montar_observacao
     from version import __version__

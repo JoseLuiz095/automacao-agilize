@@ -10,11 +10,16 @@ from tkinter import filedialog, messagebox, ttk
 
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
-from agilize_batch import AgilizeSession
+from agilize_batch import AgilizeSession, erro_navegador_fechado, erro_recursos_navegador
 from batch import GrupoLancamento, agrupar_documentos
 from browsers import labels_para_combo, label_para_preferencia
 from config import APP_HOME, LOG_DIR
-from credentials import carregar_credenciais, remover_credenciais, salvar_credenciais, salvar_navegador
+from credentials import (
+    carregar_credenciais,
+    remover_credenciais,
+    salvar_credenciais,
+    salvar_navegador,
+)
 from resources import apply_window_icon
 from updater import (
     STATE_CHECK_FAILED,
@@ -297,6 +302,331 @@ class App(TkinterDnD.Tk):
         canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
         return inner
 
+    def _build_email_downloads(self, parent):
+        parent.grid_columnconfigure(0, weight=1)
+
+        intro = tk.Frame(parent, bg=self.BG)
+        intro.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        tk.Label(intro, text="E-mail / Downloads", bg=self.BG, fg=self.TEXT, font=("Segoe UI Semibold", 17)).pack(anchor="w")
+        tk.Label(
+            intro,
+            text=(
+                "Baixe em massa os PDFs recebidos no Zimbra por remetente e período. "
+                "Links que exigirem hCaptcha ficam em uma fila manual; a automação não tenta contornar o captcha."
+            ),
+            bg=self.BG, fg=self.MUTED, font=("Segoe UI", 9), wraplength=920, justify="left",
+        ).pack(anchor="w", pady=(2, 0))
+
+        access_card, access = self._card(parent, padx=20, pady=15)
+        access_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        access.grid_columnconfigure(1, weight=1)
+        access.grid_columnconfigure(3, weight=1)
+        tk.Label(access, text="Acesso ao Zimbra", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 12)).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        ttk.Checkbutton(
+            access, text="Usar o mesmo e-mail e senha do Agilize",
+            variable=self.zimbra_usar_agilize_var,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        tk.Label(access, text="E-mail", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=2, column=0, sticky="w", padx=(0, 10), pady=5)
+        ttk.Entry(access, textvariable=self.zimbra_email_var).grid(row=2, column=1, sticky="ew", padx=(0, 16), pady=5)
+        tk.Label(access, text="Senha", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=2, column=2, sticky="w", padx=(0, 10), pady=5)
+        self.zimbra_senha_entry = ttk.Entry(access, textvariable=self.zimbra_senha_var, show="*")
+        self.zimbra_senha_entry.grid(row=2, column=3, sticky="ew", pady=5)
+
+        tk.Label(access, text="Servidor IMAP", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=3, column=0, sticky="w", padx=(0, 10), pady=5)
+        ttk.Entry(access, textvariable=self.zimbra_servidor_var).grid(row=3, column=1, sticky="ew", padx=(0, 16), pady=5)
+        tk.Label(access, text="Porta", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=3, column=2, sticky="w", padx=(0, 10), pady=5)
+        ttk.Entry(access, textvariable=self.zimbra_porta_var, width=10).grid(row=3, column=3, sticky="w", pady=5)
+
+        tk.Label(
+            access,
+            text="Deixe Servidor IMAP em branco para tentar detectar automaticamente (imap/mail/zimbra/webmail do domínio).",
+            bg=self.SURFACE, fg=self.MUTED, font=("Segoe UI", 8), wraplength=780, justify="left",
+        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(1, 7))
+
+        access_actions = tk.Frame(access, bg=self.SURFACE)
+        access_actions.grid(row=5, column=0, columnspan=4, sticky="ew")
+        self.btn_zimbra_test = ttk.Button(access_actions, text="Testar conexão", style="Secondary.TButton", command=self._zimbra_testar_conexao)
+        self.btn_zimbra_test.pack(side="right")
+
+        search_card, body = self._card(parent, padx=20, pady=15)
+        search_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        body.grid_columnconfigure(1, weight=1)
+        body.grid_columnconfigure(3, weight=1)
+        tk.Label(body, text="Pesquisa e download", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 12)).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        tk.Label(body, text="Remetente", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=1, column=0, sticky="w", padx=(0, 10), pady=5)
+        ttk.Entry(body, textvariable=self.zimbra_remetente_var).grid(row=1, column=1, sticky="ew", padx=(0, 16), pady=5)
+        tk.Label(body, text="Pasta IMAP", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=1, column=2, sticky="w", padx=(0, 10), pady=5)
+        ttk.Entry(body, textvariable=self.zimbra_pasta_var).grid(row=1, column=3, sticky="ew", pady=5)
+
+        tk.Label(body, text="Data inicial", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=2, column=0, sticky="w", padx=(0, 10), pady=5)
+        ttk.Entry(body, textvariable=self.zimbra_inicio_var).grid(row=2, column=1, sticky="ew", padx=(0, 16), pady=5)
+        tk.Label(body, text="Data final", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=2, column=2, sticky="w", padx=(0, 10), pady=5)
+        ttk.Entry(body, textvariable=self.zimbra_fim_var).grid(row=2, column=3, sticky="ew", pady=5)
+
+        tk.Label(body, text="Pasta de destino", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 9)).grid(row=3, column=0, sticky="w", padx=(0, 10), pady=5)
+        dest_line = tk.Frame(body, bg=self.SURFACE)
+        dest_line.grid(row=3, column=1, columnspan=3, sticky="ew", pady=5)
+        dest_line.grid_columnconfigure(0, weight=1)
+        ttk.Entry(dest_line, textvariable=self.zimbra_destino_var).grid(row=0, column=0, sticky="ew")
+        ttk.Button(dest_line, text="Escolher pasta", style="Secondary.TButton", command=self._zimbra_escolher_destino).grid(row=0, column=1, padx=(8, 0))
+
+        ttk.Checkbutton(
+            body,
+            text="Adicionar automaticamente os PDFs baixados à fila de lançamentos",
+            variable=self.zimbra_auto_add_var,
+        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 8))
+
+        search_actions = tk.Frame(body, bg=self.SURFACE)
+        search_actions.grid(row=5, column=0, columnspan=4, sticky="ew")
+        ttk.Button(search_actions, text="Abrir pasta", style="Secondary.TButton", command=self._zimbra_abrir_destino).pack(side="left")
+        self.btn_zimbra_search = ttk.Button(search_actions, text="BUSCAR E BAIXAR", style="Accent.TButton", command=self._zimbra_buscar_e_baixar)
+        self.btn_zimbra_search.pack(side="right")
+
+        status_card, status_body = self._card(parent, padx=18, pady=13)
+        status_card.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        status_body.grid_columnconfigure(0, weight=1)
+        tk.Label(status_body, textvariable=self.zimbra_status_var, bg=self.SURFACE, fg=self.PRIMARY, font=("Segoe UI Semibold", 9), anchor="w", justify="left", wraplength=900).grid(row=0, column=0, sticky="ew")
+        tk.Label(status_body, textvariable=self.zimbra_summary_var, bg=self.SURFACE, fg=self.MUTED, font=("Segoe UI", 8), anchor="w", justify="left").grid(row=1, column=0, sticky="ew", pady=(3, 0))
+
+        result_card, result_body = self._card(parent, padx=16, pady=13)
+        result_card.grid(row=4, column=0, sticky="ew", pady=(0, 10))
+        result_body.grid_columnconfigure(0, weight=1)
+        tk.Label(result_body, text="Mensagens encontradas", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 11)).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self.zimbra_tree = ttk.Treeview(result_body, columns=("data", "assunto", "pdfs", "manual"), show="headings", height=5, style="Queue.Treeview")
+        for key, label, width, anchor in (
+            ("data", "Data", 180, "w"),
+            ("assunto", "Assunto", 520, "w"),
+            ("pdfs", "PDFs", 70, "center"),
+            ("manual", "Manual", 80, "center"),
+        ):
+            self.zimbra_tree.heading(key, text=label)
+            self.zimbra_tree.column(key, width=width, minwidth=60, anchor=anchor, stretch=(key == "assunto"))
+        self.zimbra_tree.grid(row=1, column=0, sticky="ew")
+
+        manual_card, manual_body = self._card(parent, padx=16, pady=13)
+        manual_card.grid(row=5, column=0, sticky="ew", pady=(0, 14))
+        manual_body.grid_columnconfigure(0, weight=1)
+        tk.Label(manual_body, text="Pendências manuais (hCaptcha / portal NFS-e)", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 11)).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            manual_body,
+            text="A guia é aberta no seu navegador para você concluir o hCaptcha e fazer o download manualmente. Ela permanece aberta.",
+            bg=self.SURFACE, fg=self.MUTED, font=("Segoe UI", 8), wraplength=900, justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(2, 6))
+        self.zimbra_manual_tree = ttk.Treeview(manual_body, columns=("assunto", "url"), show="headings", height=4, style="Queue.Treeview", selectmode="browse")
+        self.zimbra_manual_tree.heading("assunto", text="Mensagem")
+        self.zimbra_manual_tree.heading("url", text="Link")
+        self.zimbra_manual_tree.column("assunto", width=330, minwidth=150, anchor="w")
+        self.zimbra_manual_tree.column("url", width=600, minwidth=240, anchor="w", stretch=True)
+        self.zimbra_manual_tree.grid(row=2, column=0, sticky="ew")
+        manual_actions = tk.Frame(manual_body, bg=self.SURFACE)
+        manual_actions.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(manual_actions, text="Abrir selecionado", style="Secondary.TButton", command=self._zimbra_abrir_link_selecionado).pack(side="left")
+        ttk.Button(manual_actions, text="Abrir próximo", style="Secondary.TButton", command=self._zimbra_abrir_proximo_link).pack(side="left", padx=(8, 0))
+        ttk.Button(manual_actions, text="Importar PDFs baixados manualmente", style="Secondary.TButton", command=self._zimbra_importar_downloads_manuais).pack(side="right")
+
+    def _zimbra_escolher_destino(self):
+        initial = self.zimbra_destino_var.get().strip() or str(Path.home() / "Downloads")
+        path = filedialog.askdirectory(title="Pasta para salvar os PDFs", initialdir=initial)
+        if path:
+            self.zimbra_destino_var.set(path)
+
+    def _zimbra_abrir_destino(self):
+        try:
+            path = Path(self.zimbra_destino_var.get().strip() or (Path.home() / "Downloads" / "AutomacaoAgilize")).expanduser().resolve()
+            path.mkdir(parents=True, exist_ok=True)
+            if os.name == "nt":
+                os.startfile(str(path))
+            else:
+                webbrowser.open(path.as_uri())
+        except Exception as exc:
+            messagebox.showerror("E-mail / Downloads", str(exc))
+
+    def _zimbra_config(self) -> ZimbraSearchConfig:
+        usar_agilize = self.zimbra_usar_agilize_var.get()
+        email = self.email_var.get().strip() if usar_agilize else self.zimbra_email_var.get().strip()
+        senha = self.senha_var.get() if usar_agilize else self.zimbra_senha_var.get()
+        try:
+            porta = int(self.zimbra_porta_var.get().strip() or "993")
+        except Exception:
+            raise ValueError("Porta IMAP inválida.")
+        return ZimbraSearchConfig(
+            email=email,
+            senha=senha,
+            remetente=self.zimbra_remetente_var.get().strip(),
+            data_inicio=parse_data_br(self.zimbra_inicio_var.get()),
+            data_fim=parse_data_br(self.zimbra_fim_var.get()),
+            destino=Path(self.zimbra_destino_var.get().strip() or (Path.home() / "Downloads" / "AutomacaoAgilize")),
+            servidor=self.zimbra_servidor_var.get().strip(),
+            porta=porta,
+            pasta=self.zimbra_pasta_var.get().strip() or "INBOX",
+        )
+
+    def _zimbra_salvar_config(self, cfg: ZimbraSearchConfig, servidor_resolvido: str = ""):
+        # Apenas persistencia: nao toca em variaveis Tk porque esta funcao pode
+        # ser chamada pela thread de rede. Atualizacoes visuais usam self.after().
+        salvar_credenciais_zimbra(
+            cfg.email,
+            cfg.senha,
+            servidor_resolvido or cfg.servidor,
+            cfg.porta,
+            cfg.pasta,
+            cfg.remetente,
+            str(cfg.destino),
+        )
+
+    def _zimbra_testar_conexao(self):
+        try:
+            cfg = self._zimbra_config()
+        except Exception as exc:
+            messagebox.showerror("Zimbra", str(exc))
+            return
+        self.btn_zimbra_test.configure(state="disabled")
+        self.zimbra_status_var.set("Testando conexão segura com o Zimbra...")
+
+        def worker():
+            try:
+                host = testar_conexao_zimbra(cfg)
+                self._zimbra_salvar_config(cfg, host)
+                self.after(0, lambda h=host: self.zimbra_servidor_var.set(h))
+                self.after(0, lambda: self.zimbra_status_var.set(f"Conexão IMAP confirmada em {host}:{cfg.porta}."))
+                self.after(0, lambda: messagebox.showinfo("Zimbra", f"Conexão confirmada em {host}:{cfg.porta}."))
+            except Exception as exc:
+                self.after(0, lambda: self.zimbra_status_var.set(f"Falha de conexão: {exc}"))
+                self.after(0, lambda: messagebox.showerror("Zimbra", str(exc)))
+            finally:
+                self.after(0, lambda: self.btn_zimbra_test.configure(state="normal"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _zimbra_buscar_e_baixar(self):
+        try:
+            cfg = self._zimbra_config()
+        except Exception as exc:
+            messagebox.showerror("E-mail / Downloads", str(exc))
+            return
+        self.btn_zimbra_search.configure(state="disabled")
+        auto_add = bool(self.zimbra_auto_add_var.get())
+        self.zimbra_status_var.set("Pesquisando mensagens no Zimbra e baixando anexos PDF...")
+        self.zimbra_summary_var.set(f"Remetente: {cfg.remetente} · {format_data_br(cfg.data_inicio)} a {format_data_br(cfg.data_fim)}")
+        self.zimbra_download_started_at = __import__('time').time()
+
+        def logger(msg: str):
+            self.after(0, lambda m=msg: self.zimbra_status_var.set(m))
+
+        def worker():
+            try:
+                result = buscar_e_baixar(cfg, logger=logger)
+                self.zimbra_result = result
+                self._zimbra_salvar_config(cfg, cfg.servidor)
+                self.after(0, lambda: self._zimbra_render_result(result))
+                if auto_add and result.pdfs:
+                    self.after(0, lambda paths=[str(p) for p in result.pdfs]: self._registrar_documentos(paths, append=True))
+            except Exception as exc:
+                self.after(0, lambda: self.zimbra_status_var.set(f"Não foi possível concluir a pesquisa: {exc}"))
+                self.after(0, lambda: messagebox.showerror("E-mail / Downloads", str(exc)))
+            finally:
+                self.after(0, lambda: self.btn_zimbra_search.configure(state="normal"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _zimbra_render_result(self, result):
+        for tree in (self.zimbra_tree, self.zimbra_manual_tree):
+            for iid in tree.get_children():
+                tree.delete(iid)
+        self.zimbra_manual_links = []
+        for idx, item in enumerate(result.itens):
+            self.zimbra_tree.insert(
+                "", "end", iid=f"mail-{idx}",
+                values=(self._compact_name(item.data, 26), self._compact_name(item.assunto or "(sem assunto)", 72), len(item.pdfs), len(item.links_manuais)),
+            )
+            for link in item.links_manuais:
+                key = f"manual-{len(self.zimbra_manual_links)}"
+                self.zimbra_manual_links.append((item.assunto or "(sem assunto)", link))
+                self.zimbra_manual_tree.insert("", "end", iid=key, values=(self._compact_name(item.assunto or "(sem assunto)", 48), self._compact_name(link, 95)))
+        self.zimbra_status_var.set(
+            f"Concluído: {result.mensagens_lidas} mensagem(ns), {len(result.pdfs)} PDF(s) baixado(s), "
+            f"{len(result.links_manuais)} pendência(s) manual(is)."
+        )
+        self.zimbra_summary_var.set(
+            "Os PDFs anexos já foram salvos. Links com portal/hCaptcha ficam abaixo para abertura manual."
+        )
+
+    def _zimbra_abrir_link_selecionado(self):
+        selected = self.zimbra_manual_tree.selection()
+        if not selected:
+            messagebox.showinfo("Pendências manuais", "Selecione um link para abrir.")
+            return
+        iid = selected[0]
+        try:
+            idx = int(iid.split("-")[-1])
+            _assunto, url = self.zimbra_manual_links[idx]
+        except Exception:
+            return
+        webbrowser.open_new_tab(url)
+        self.zimbra_status_var.set("Portal NFS-e aberto. Resolva o hCaptcha e faça o download manualmente; a guia permanecerá aberta.")
+
+    def _zimbra_abrir_proximo_link(self):
+        if not self.zimbra_manual_links:
+            messagebox.showinfo("Pendências manuais", "Não há links manuais pendentes nesta pesquisa.")
+            return
+        children = list(self.zimbra_manual_tree.get_children())
+        if not children:
+            return
+        current = self.zimbra_manual_tree.selection()
+        if current and current[0] in children:
+            idx = (children.index(current[0]) + 1) % len(children)
+        else:
+            idx = 0
+        iid = children[idx]
+        self.zimbra_manual_tree.selection_set(iid)
+        self.zimbra_manual_tree.focus(iid)
+        self.zimbra_manual_tree.see(iid)
+        self._zimbra_abrir_link_selecionado()
+
+    def _zimbra_importar_downloads_manuais(self):
+        if not self.zimbra_download_started_at:
+            messagebox.showinfo("Downloads manuais", "Execute primeiro uma pesquisa de e-mails para definir o período desta sessão.")
+            return
+        destino = Path(self.zimbra_destino_var.get().strip() or (Path.home() / "Downloads" / "AutomacaoAgilize")).expanduser().resolve()
+        destino.mkdir(parents=True, exist_ok=True)
+        fontes = [Path.home() / "Downloads", destino]
+        encontrados: list[Path] = []
+        limite = self.zimbra_download_started_at - 5
+        for folder in fontes:
+            try:
+                for p in folder.glob("*.pdf"):
+                    try:
+                        if p.stat().st_mtime >= limite and p not in encontrados:
+                            encontrados.append(p.resolve())
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        if not encontrados:
+            messagebox.showinfo("Downloads manuais", "Nenhum PDF novo foi encontrado na pasta Downloads desde o início da pesquisa.")
+            return
+
+        copiados: list[Path] = []
+        for src in encontrados:
+            target = src
+            try:
+                if src.parent.resolve() != destino.resolve():
+                    target = destino / src.name
+                    if target.exists() and target.stat().st_size != src.stat().st_size:
+                        stem, suffix = target.stem, target.suffix
+                        n = 2
+                        while target.exists():
+                            target = destino / f"{stem} ({n}){suffix}"
+                            n += 1
+                    if not target.exists():
+                        shutil.copy2(src, target)
+                copiados.append(target.resolve())
+            except Exception:
+                copiados.append(src)
+        self._registrar_documentos([str(p) for p in copiados], append=True)
+        self.zimbra_status_var.set(f"{len(copiados)} PDF(s) manual(is) importado(s) para a fila de lançamentos.")
+
     def _build_lancamento(self, parent):
         parent.grid_columnconfigure(0, weight=1)
 
@@ -323,14 +653,14 @@ class App(TkinterDnD.Tk):
         ).grid(row=0, column=1, padx=(0, 10), pady=6)
         self.update_banner.grid_remove()
 
-        # Mesmos módulos exibidos no menu do Agilize. A seleção define onde o sistema
-        # procura a referência primeiro; se não encontrar, pesquisa automaticamente nos demais.
+        # A seleção define a área de DESTINO do lançamento. A busca histórica pode
+        # consultar outra área para reaproveitar observação/aprovador, sem mudar o destino.
         ref_card, ref_body = self._card(parent, padx=16, pady=12)
         ref_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        tk.Label(ref_body, text="Pesquisa de histórico", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 10)).pack(anchor="w")
+        tk.Label(ref_body, text="Área do lançamento", bg=self.SURFACE, fg=self.TEXT, font=("Segoe UI Semibold", 10)).pack(anchor="w")
         tk.Label(
             ref_body,
-            text="Escolha onde procurar primeiro pelo CNPJ. Se não houver registro, a busca continua nas outras áreas do Agilize.",
+            text="Automático identifica o tipo pelo PDF. Se você escolher uma área, o lançamento será aberto nela; a pesquisa histórica pode consultar outra área sem alterar o destino.",
             bg=self.SURFACE, fg=self.MUTED, font=("Segoe UI", 8), wraplength=900, justify="left"
         ).pack(anchor="w", pady=(2, 8))
         tipos_line = tk.Frame(ref_body, bg=self.SURFACE)
@@ -408,7 +738,7 @@ class App(TkinterDnD.Tk):
         ttk.Button(actions, text="Limpar fila", style="Secondary.TButton", command=self._limpar_documentos).pack(side="left")
         self.btn_selected = ttk.Button(actions, text="PREPARAR SELECIONADO", style="Secondary.TButton", command=self._preparar_selecionado)
         self.btn_selected.pack(side="right", padx=(8, 0))
-        self.btn_processar = ttk.Button(actions, text="PREPARAR TODOS NO AGILIZE", style="Accent.TButton", command=self.processar_e_abrir)
+        self.btn_processar = ttk.Button(actions, text="PREPARAR TODOS (1 POR VEZ)", style="Accent.TButton", command=self.processar_e_abrir)
         self.btn_processar.pack(side="right")
         self.btn_processar.configure(state="disabled")
         self.btn_selected.configure(state="disabled")
@@ -417,7 +747,7 @@ class App(TkinterDnD.Tk):
         note.grid(row=5, column=0, sticky="ew", pady=(10, 0))
         tk.Label(
             note,
-            text="Cada lançamento é independente. Depois que um formulário for preparado, você já pode abrir o próximo sem precisar enviar o anterior.",
+            text="PROCESSAMENTO SEQUENCIAL: para manter o navegador estável, a automação abre somente 1 lançamento por vez. Envie, cancele ou feche o formulário atual para liberar automaticamente o próximo da fila.",
             bg="#F7FAFC", fg="#516576", font=("Segoe UI", 8), anchor="w", justify="left", wraplength=890, padx=10, pady=7
         ).pack(fill="x")
 
@@ -435,11 +765,24 @@ class App(TkinterDnD.Tk):
         detail_line.pack(fill="x", padx=16, pady=(5, 8))
         self.btn_detalhes = ttk.Button(detail_line, text="Ver detalhes", style="Ghost.TButton", command=self._toggle_detalhes)
         self.btn_detalhes.pack(side="left")
+        self.btn_copiar_detalhes = ttk.Button(
+            detail_line, text="Copiar detalhes", style="Ghost.TButton", command=self._copiar_detalhes
+        )
+        self.btn_copiar_detalhes.pack(side="left", padx=(6, 0))
+        ttk.Button(detail_line, text="Limpar detalhes", style="Ghost.TButton", command=self._limpar_log).pack(side="left", padx=(6, 0))
         tk.Label(detail_line, text="O envio final permanece manual em cada aba.", bg=self.SURFACE, fg=self.MUTED, font=("Segoe UI", 8)).pack(side="right")
 
         self.log_frame = tk.Frame(status_card, bg=self.SURFACE)
-        self.log = tk.Text(self.log_frame, height=6, state="disabled", wrap="word", bd=0, bg=self.SURFACE_ALT, fg="#405467", font=("Consolas", 9), padx=10, pady=8)
-        self.log.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+        self.log_frame.grid_columnconfigure(0, weight=1)
+        self.log_frame.grid_rowconfigure(0, weight=1)
+        self.log = tk.Text(
+            self.log_frame, height=14, state="disabled", wrap="word", bd=0,
+            bg=self.SURFACE_ALT, fg="#405467", font=("Consolas", 9), padx=10, pady=8
+        )
+        log_scroll = SlimScrollbar(self.log_frame, self.log.yview, width=6, bg=self.SURFACE)
+        self.log.configure(yscrollcommand=log_scroll.set)
+        self.log.grid(row=0, column=0, sticky="nsew", padx=(16, 4), pady=(0, 12))
+        log_scroll.grid(row=0, column=1, sticky="ns", padx=(0, 12), pady=(2, 14))
 
     def _set_tipo_preferido(self, key: str):
         self.tipo_preferido_var.set(key)
@@ -766,6 +1109,21 @@ class App(TkinterDnD.Tk):
             self.log_frame.pack_forget()
             self.btn_detalhes.configure(text="Ver detalhes")
 
+    def _copiar_detalhes(self):
+        texto = self.log.get("1.0", "end-1c").strip()
+        if not texto:
+            messagebox.showinfo("Detalhes", "Ainda não há detalhes para copiar.")
+            return
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(texto)
+            self.update_idletasks()
+            self.btn_copiar_detalhes.configure(text="Copiado!")
+            self.after(1800, lambda: self.btn_copiar_detalhes.configure(text="Copiar detalhes"))
+            self.status_execucao.set("Detalhes copiados para a área de transferência")
+        except Exception as exc:
+            messagebox.showerror("Copiar detalhes", f"Não foi possível copiar os detalhes: {exc}")
+
     def _limpar_log(self):
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
@@ -949,6 +1307,14 @@ class App(TkinterDnD.Tk):
         self._enfileirar_grupos(self.grupos)
 
     def _enfileirar_grupos(self, grupos: list[GrupoLancamento]):
+        grupos_novos = [g for g in grupos if g.status not in ("Na fila", "Preparando", "Aguardando anterior")]
+        if len(grupos_novos) > 1:
+            messagebox.showinfo(
+                "Processamento um por um",
+                "Para evitar falhas e falta de recursos do navegador, os lançamentos serão preparados 1 por vez.\n\n"
+                "Depois que você enviar, cancelar ou fechar o lançamento atual no Agilize, o próximo da fila será aberto automaticamente.\n\n"
+                "O envio final continua sempre manual.",
+            )
         creds = carregar_credenciais()
         browser_key = self.browser_map.get(self.browser_var.get(), creds.navegador or "auto")
         preferido = self.tipo_preferido_var.get()
@@ -976,8 +1342,11 @@ class App(TkinterDnD.Tk):
             enviados += 1
         self._refresh_queue_tree()
         if enviados:
-            self.status_execucao.set(f"{enviados} lançamento(s) na fila do navegador")
-            self.log_msg(f"{enviados} lançamento(s) adicionados à fila. Não é necessário enviar um para preparar o próximo.")
+            self.status_execucao.set(f"{enviados} lançamento(s) na fila · processamento 1 por vez")
+            self.log_msg(
+                f"{enviados} lançamento(s) adicionados à fila. Modo sequencial ativo: somente 1 será preparado por vez. "
+                "Envie/cancele ou feche o formulário atual para liberar automaticamente o próximo."
+            )
         else:
             messagebox.showinfo("Fila", "Nenhum lançamento novo foi adicionado. Verifique os status da lista.")
 
@@ -1008,21 +1377,80 @@ class App(TkinterDnD.Tk):
                         navegador=job["browser"], email=job["email"], senha=job["senha"], logger=self.log_msg
                     )
                     session_config = config
+
                 self.after(0, lambda k=grupo.key: self._set_group_status(k, "Preparando"))
                 self.log_msg(f"Preparando lançamento {grupo.numero or '(sem referência)'}...")
                 anexos = [str(p) for p in grupo.paths]
                 conferencia = str(grupo.conferencia_pdf or grupo.paths[0])
-                session.preparar_lancamento(
-                    grupo.dados,
-                    anexos_pdf=anexos,
-                    conferencia_pdf=conferencia,
-                    tipo_preferido=job["preferido"],
-                    tipo_sugerido=grupo.tipo_sugerido,
-                )
-                self.after(0, lambda k=grupo.key: self._set_group_status(k, "Aberto para conferência"))
-                self.after(0, lambda: self.status_execucao.set("Formulário aberto · fila continua disponível"))
+
+                # Uma janela Chromium pode ser fechada pelo usuario, por uma atualizacao
+                # do navegador ou por falha do contexto persistente. Reabre e repete o
+                # MESMO grupo uma unica vez, sem derrubar os proximos itens da fila.
+                ultimo_erro = None
+                for tentativa in (1, 2):
+                    try:
+                        resultado_preparo = session.preparar_lancamento(
+                            grupo.dados,
+                            anexos_pdf=anexos,
+                            conferencia_pdf=conferencia,
+                            tipo_preferido=job["preferido"],
+                            tipo_sugerido=grupo.tipo_sugerido,
+                        )
+                        ultimo_erro = None
+                        break
+                    except Exception as exc:
+                        ultimo_erro = exc
+                        if tentativa == 1 and erro_recursos_navegador(exc):
+                            self.log_msg(
+                                "O Chromium atingiu o limite temporario de recursos. "
+                                "A fila vai aguardar/liberar abas concluidas e repetir este lancamento sem fechar os formularios ja abertos..."
+                            )
+                            self.after(0, lambda k=grupo.key: self._set_group_status(k, "Aguardando recursos"))
+                            try:
+                                session._limpar_workspaces_concluidos()
+                            except Exception:
+                                pass
+                            import time as _time
+                            _time.sleep(2.0)
+                            continue
+                        if tentativa == 1 and erro_navegador_fechado(exc):
+                            self.log_msg(
+                                "O navegador/contexto foi fechado durante o processamento. "
+                                "Reabrindo a sessao e tentando este lancamento novamente..."
+                            )
+                            self.after(0, lambda k=grupo.key: self._set_group_status(k, "Reconectando"))
+                            try:
+                                session.close()
+                            except Exception:
+                                pass
+                            session = AgilizeSession(
+                                navegador=job["browser"], email=job["email"], senha=job["senha"], logger=self.log_msg
+                            )
+                            session_config = config
+                            continue
+                        raise
+                if ultimo_erro is not None:
+                    raise ultimo_erro
+
+                estado = (resultado_preparo or {}).get("state") if isinstance(resultado_preparo, dict) else "aberto"
+                if estado == "ja_processado":
+                    situacao = str((resultado_preparo or {}).get("situacao") or "Já lançado")
+                    status = f"Já existe · {situacao}" if situacao else "Já existe"
+                    self.after(0, lambda k=grupo.key, st=status: self._set_group_status(k, st))
+                    self.after(0, lambda: self.status_execucao.set("Registro já estava lançado · seguindo para o próximo"))
+                else:
+                    self.after(0, lambda k=grupo.key: self._set_group_status(k, "Aberto para conferência"))
+                    self.after(0, lambda: self.status_execucao.set("Formulário aberto · conclua para liberar o próximo"))
             except Exception as exc:
                 self.log_msg(f"ERRO no grupo {grupo.numero or grupo.key}: {exc}")
+                if erro_navegador_fechado(exc):
+                    try:
+                        if session is not None:
+                            session.close()
+                    except Exception:
+                        pass
+                    session = None
+                    session_config = None
                 self.after(0, lambda k=grupo.key: self._set_group_status(k, "Erro"))
             finally:
                 self._browser_jobs.task_done()

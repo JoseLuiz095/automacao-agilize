@@ -1,3 +1,107 @@
+## 0.9.11
+
+- Fallback seguro para NFS-e pré-cadastrada com prefixo indevido no número, como `2721` x `2600000002721`.
+- Busca de contingência da nota atual por CNPJ/nome do fornecedor inclui o mês da emissão + 3 meses anteriores.
+- Reutilização exige conferência de empresa, fornecedor, valor e emissão antes de aceitar o número por sufixo.
+- Publicador passa a inicializar Git quando o projeto veio de ZIP, alinhar o novo commit sobre `origin/main` e preservar o histórico remoto.
+- `07_PUBLICAR_VERSAO.bat` passa a interromper a publicação se o push do código-fonte falhar.
+
+## 0.9.10
+
+- Pesquisa do Agilize ganhou espera de estabilização da grade antes da leitura dos resultados.
+- Debounce de pesquisa ficou ligeiramente mais conservador sem desacelerar o preenchimento normal do formulário.
+- Mantida a janela de três meses completos anteriores para histórico NFS-e.
+
+## 0.9.9
+
+- NFS-E: histórico ampliado para 3 meses completos anteriores ao mês da nota atual.
+- NFS-E: confirmação visual/reaplicação dos filtros de data após rerender do Livewire.
+- Cache histórico alinhado à nova janela de pesquisa.
+
+## 0.9.8
+- Registros Aguardando Aprovacao/Efetuada deixam de ser reprocessados.
+- Melhor fallback para acoes Editar/Ver nota.
+- Campo Anexo opcional em registros existentes quando o Agilize nao o expoe.
+- Pre-check de registro atual antes da pesquisa historica e cache de historico.
+- Removida a aba E-mail / Downloads.
+- Reduzidos reloads e esperas redundantes.
+
+# Changelog
+
+## 0.9.7
+
+- ampliado o painel **Ver detalhes** para facilitar lotes com muitos lançamentos;
+- adicionado botão **Copiar detalhes** para copiar o log completo para a área de transferência;
+- adicionado botão **Limpar detalhes**;
+- adicionada barra de rolagem fina no painel de log.
+
+## 0.9.6
+
+- Fila alterada para processamento sequencial: 1 lançamento por vez.
+- Aviso visual antes de processar lotes com múltiplos lançamentos.
+- Próximo lançamento é liberado automaticamente após enviar/cancelar/fechar o atual.
+- Botão principal atualizado para `PREPARAR TODOS (1 POR VEZ)`.
+- Mantida a recuperação para `ERR_INSUFFICIENT_RESOURCES` como proteção adicional.
+
+## 0.9.5
+- Corrige esgotamento de recursos do Chromium em lotes grandes com limite seguro de workspaces e retomada automática da fila.
+- Adiciona retry específico para `ERR_INSUFFICIENT_RESOURCES`.
+- Adiciona aba E-mail / Downloads com busca Zimbra via IMAP por remetente e período.
+- Anexos PDF podem entrar automaticamente na fila.
+- Links de portal NFS-e/hCaptcha ficam pendentes para abertura e download manual.
+
+## 0.9.4
+
+- Mesmo Número da nota passa a reutilizar qualquer registro existente, independentemente da Situação de Entrada.
+- Pesquisa da nota atual passa a usar Todos os status.
+- Busca anti-duplicidade possui tentativas com mês atual, período ampliado e todas as empresas.
+- Empresa, fornecedor, valor e emissão viram critérios de preferência, não motivos para criar outra nota.
+- Se a nota existe mas não for possível abrir Editar/Ver nota, o lançamento novo é bloqueado por segurança.
+
+## 0.9.3
+
+- Corrigido pareamento do recibo/boleto Auditor 2894 com o DANFSe oficial.
+- Nova filial LCR 0029-40 reconhecida como empresa/tomador.
+- Pré-lançamentos NFS-E em `Não possui` são procurados antes da criação de uma nova nota.
+- Resolução dinâmica de empresa pelo select do Agilize para filiais novas.
+
+## 0.9.2
+- Em `Doc. - Contas a pagar`, amplia a janela histórica para hoje menos 2 meses até hoje.
+- Datas são aplicadas imediatamente antes da busca pelo fornecedor, depois dos demais filtros.
+- Aguarda debounce do Livewire e confirma/reaplica os campos de data quando necessário.
+- Mantém a pesquisa de Contas a pagar pelo nome do fornecedor.
+
+# 0.9.1
+
+- Doc. - Contas a pagar passa a pesquisar o histórico exclusivamente pelo nome do fornecedor.
+- Destino do lançamento resolvido antes da pesquisa histórica.
+- Modo Automático da LOL não visita NFS-E para procurar observação.
+- Recuperação automática de `Target page, context or browser has been closed`, com uma repetição segura do grupo.
+- Sessão fechada deixa de contaminar os lançamentos seguintes da fila.
+
+## 0.9.0
+
+- Em `Doc. - Contas a pagar`, a pesquisa histórica usa o nome do fornecedor/beneficiário em vez do número da nota/fatura.
+- Mantida a pesquisa por CNPJ em `Notas NFS-E`.
+- Logs passam a informar explicitamente o nome usado na pesquisa histórica.
+
+## 0.8.9
+
+
+- separa a area de destino do lancamento da area usada para pesquisa historica;
+- `Doc. - Contas a pagar` selecionado passa a ser respeitado como destino final;
+- modo Automatico direciona Nota de Debito/LOL para `Doc. - Contas a pagar`;
+- historico pode ser reaproveitado de NFS-E sem redirecionar o lancamento atual para NFS-E;
+- adiciona protecao para nunca criar NFS-E como fallback quando o destino correto e `/documentos`.
+
+## 0.8.5
+
+- compatibilidade com a atualização do Agilize que passou a abrir notas por `openNfsModal(id)`;
+- busca da nota-base aceita `Editar` como botão/link e `Ver nota`;
+- leitura da observação passa a usar o estado Livewire `serverMemo.data.nfs.description` como fonte principal;
+- espera correta da segunda etapa do modal Livewire antes de copiar observação/aprovador;
+- mantém fallback pelo textarea para compatibilidade com layouts anteriores.
+
 # Changelog
 
 ## 0.8.4
@@ -129,3 +233,24 @@
 - Adicionado fallback de desenvolvimento por Git/Git Credential Manager.
 - Download autenticado de assets privados suportado quando token esta configurado.
 - Nova regressao cobrindo 404 de Release com repositorio existente.
+
+## 0.8.6
+- Corrige pesquisa da nota-base para considerar somente **Situação de Entrada = Efetuada**.
+- Rejeita em código registros `Não possui`, `Aguardando Entrada` etc., mesmo se o filtro do Livewire não permanecer aplicado.
+- Reforça validação de empresa/filial na escolha do histórico.
+
+## 0.8.7
+- Corrigida leitura da Observacao no modal Livewire ativo.
+- Evita selecionar textarea oculto quando existem modais/componentes antigos no DOM.
+- Le diretamente o runtime do Livewire antes dos fallbacks de HTML.
+- Aguarda sincronizacao de nfs.description antes de vencimento/anexos.
+- Confere a Observacao novamente apos upload dos PDFs.
+
+## 0.8.9
+
+- suporte ao novo fluxo `Enviar nota importada (NFS-E)`;
+- procura a NFS-e atual em `Situação de Entrada = Não possui` antes de criar novo lançamento;
+- valida número + empresa/filial + CNPJ fornecedor + valor + emissão;
+- completa no registro importado apenas aprovador, observação, anexos e vencimento;
+- mantém a busca da observação histórica exclusivamente em registros `Efetuada`;
+- evita lançamento duplicado quando o Agilize já importou a NFS-e.

@@ -11,7 +11,7 @@ sys.path.insert(0, str(APP_DIR))
 def test_search_order_without_nfe() -> None:
     from tipos_agilize import ordem_pesquisa
     assert [t.key for t in ordem_pesquisa("auto", "nfse")] == ["nfse", "documentos"]
-    assert [t.key for t in ordem_pesquisa("auto", "documentos")] == ["documentos", "nfse"]
+    assert [t.key for t in ordem_pesquisa("auto", "documentos")] == ["documentos"]
     assert "nfe" not in [t.key for t in ordem_pesquisa("nfe", "nfe")]
 
 

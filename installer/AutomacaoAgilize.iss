@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "0.8.4"
+  #define MyAppVersion "0.9.11"
 #endif
 
 #define MyAppName "Automação Agilize"

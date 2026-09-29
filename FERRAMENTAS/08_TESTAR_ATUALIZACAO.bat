@@ -16,7 +16,7 @@ if not defined PY (
 )
 
 echo ============================================================
-echo Automacao Agilize - Diagnostico de atualizacao v0.8.4+
+echo Automacao Agilize - Diagnostico de atualizacao v0.8.6+
 echo ============================================================
 echo Fonte oficial:
 echo https://github.com/JoseLuiz095/automacao-agilize/releases/latest

@@ -1,6 +1,79 @@
 # Automação Agilize
 
-## v0.8.4 — Starting Hub/Sicoob e demonstrativo informativo
+## v0.9.11 — localizar pré-cadastro com número incorreto e publicar código no GitHub
+
+A procura da nota atual ganhou um fallback seguro para o caso em que o Agilize pré-cadastra o número com um prefixo indevido. Exemplo tratado: **NFS-e 2721** aparecendo na lista como **2600000002721**. Quando a busca pelo número exato falha, a automação pesquisa o fornecedor em **Notas NFS-E** incluindo o mês atual e os 3 meses anteriores. A linha só é reutilizada quando número por sufixo, empresa, fornecedor, valor e emissão conferem.
+
+O `FERRAMENTAS\07_PUBLICAR_VERSAO.bat` também foi reforçado. Agora ele funciona mesmo quando o projeto veio de ZIP sem `.git`, preserva o histórico de `origin/main`, cria o commit da versão e **exige que o push do código-fonte seja concluído antes de publicar a Release**. Assim o repositório não fica parado em uma versão antiga enquanto o instalador avança.
+
+## v0.9.10 — pesquisa com estabilização do Livewire
+
+Nesta versão, as pesquisas aguardam um pouco mais o Livewire e a grade terminarem de renderizar antes de ler os resultados. Isso evita avançar enquanto a pesquisa ainda não apareceu visualmente no navegador.
+
+A busca de observação em **Notas NFS-E** agora cobre os **3 meses completos anteriores** ao mês da nota atual (mês anterior + 2 meses extras). Os campos de data também são conferidos após o Livewire atualizar a tela e reaplicados se o Agilize restaurar o período padrão.
+
+## v0.9.8 — lotes mais rápidos e tratamento de registros já enviados
+
+A v0.9.8 corrige os erros observados em lotes grandes depois que várias notas já estavam no Agilize. Registros em **Aguardando Aprovação** ou **Efetuada** são reconhecidos como já processados e a fila segue para o próximo item sem tentar reenviar anexos ou procurar observação novamente.
+
+Principais ajustes:
+
+- mantém o processamento **1 por vez** para estabilidade;
+- verifica primeiro se a nota atual já está lançada;
+- pula automaticamente registros em **Aguardando Aprovação / Efetuada**;
+- reforça a abertura de **Editar / Ver nota** para botões que agora aparecem apenas como ícone;
+- em registros existentes editáveis, a ausência do campo **Anexo** não derruba o lote quando o Agilize não oferece esse campo;
+- para **Não possui**, o anexo continua obrigatório e a busca é repetida especificamente nesse status quando necessário;
+- reduz reloads redundantes de `/nfs` e reaproveita referências históricas em cache;
+- remove a aba **E-mail / Downloads** da interface;
+- mantém **Ver detalhes / Copiar detalhes** para diagnóstico de lotes.
+
+Detalhes: `DOCUMENTACAO/CORRECOES_V098.md`.
+
+## v0.9.4 — editar registro existente antes de criar nova NFS-e
+
+- Se o número da nota já existir no Agilize, o sistema abre **Editar / Ver nota** independentemente da Situação de Entrada.
+- Uma nova NFS-e só é criada depois de buscas ampliadas não encontrarem nenhum registro com o mesmo número.
+- Divergências secundárias de valor/data/status não autorizam duplicar uma nota existente.
+
+## v0.9.3 — pareamento Auditor 2894 e pré-lançamentos do Agilize
+
+- Corrige o pareamento da NFS-e `2894`: recibo/boleto + DANFSe oficial agora formam **1 lançamento com 2 PDFs**.
+- Adiciona a filial `LCR COMERCIO DE MOVEIS LTDA (0029-40)` / `09.081.947/0029-40` (`company_id 42`).
+- O parser passa a separar explicitamente CNPJ de **tomador/cliente** e **fornecedor**, inclusive quando uma filial nova ainda não está no mapa local.
+- Em NFS-E, antes de criar um novo lançamento, o sistema procura a nota atual já pré-lançada em **Situação de Entrada = Não possui** e, se os dados conferirem, complementa esse registro.
+- O ID de uma filial nova também pode ser resolvido diretamente pelo select de empresas exibido no Agilize.
+
+## v0.9.2 — janela de 2 meses em Doc. - Contas a pagar
+
+- Em `Doc. - Contas a pagar`, a pesquisa histórica continua sendo pelo **nome do fornecedor/beneficiário**.
+- Antes de pesquisar o nome, a automação altera o período para **hoje - 2 meses até hoje**.
+- Os filtros de data são preenchidos por último, depois de empresa e tipo de pesquisa, para evitar que o Livewire restaure a data do dia.
+- O sistema aguarda o debounce dos campos e confere os valores que realmente ficaram na tela; se o Agilize restaurar as datas, elas são reaplicadas.
+- Em `Notas NFS-E`, permanece a regra anterior de pesquisa no mês anterior.
+
+## v0.9.1 — pesquisa histórica correta em Contas a pagar
+
+- Em `Doc. - Contas a pagar`, a busca da observação anterior é feita pelo **nome do fornecedor/beneficiário**.
+- Para a LOL, a chave de pesquisa é `LOL SERVIÇOS DE INTERNET LTDA`.
+- O número da nota/fatura continua sendo usado para localizar o lançamento atual, mas não para buscar a observação histórica.
+- Em `Notas NFS-E`, a busca histórica continua por CNPJ do fornecedor.
+
+
+## v0.8.9 — destino correto para Doc. - Contas a pagar
+
+- A seleção `Doc. - Contas a pagar` agora controla o **destino final** do lançamento, não apenas a pesquisa histórica.
+- No modo **Automático**, Notas de Débito da LOL (`09.267.506/0001-36`) são direcionadas para `/documentos`.
+- A observação/aprovador pode ser localizada em NFS-E como referência histórica sem fazer o lançamento atual mudar para NFS-E.
+- Se o formulário de `/documentos` não puder ser reconhecido, a automação mantém a área correta aberta e interrompe o processo; não cria NFS-E por engano.
+
+## v0.8.6 — histórico somente com Situação de Entrada Efetuada
+
+- A busca da nota-base do mês anterior agora força **Situação de Entrada = Efetuada**.
+- Registros **Não possui**, Aguardando Entrada e outras situações são descartados mesmo se o Livewire não mantiver o filtro.
+- A empresa/filial também é validada antes de reaproveitar observação e aprovador.
+
+## v0.8.5 — compatibilidade com o novo modal de notas do Agilize
 
 - Pareia NFS-e 2657 com boleto Sicoob pelo **Nº do Documento 2657**.
 - Corrige leitura do CNPJ do beneficiário usando validação real dos dígitos do CNPJ.
@@ -134,3 +207,10 @@ A execução normal continua usando `https://moveis-linhares.startinghub.com.br`
 ## Atualizador v0.7.3
 
 O verificador diferencia repositorio inexistente/privado de repositorio existente sem Release. Consulte `DOCUMENTACAO/CORRECOES_V073.md`.
+
+### v0.8.7 - Observacao no Agilize atualizado
+A leitura do historico agora usa o componente Livewire ativo e o preenchimento da Observacao e validado antes e depois do upload dos anexos. Veja `DOCUMENTACAO/CORRECOES_V087.md`.
+
+### v0.8.9 - NFS-e já importada pelo Agilize
+
+Quando a NFS-e atual já aparecer na lista com **Situação de Entrada = Não possui**, a Automação Agilize não abre um segundo lançamento. Ela confirma Número, Empresa/filial, CNPJ fornecedor, Valor e Emissão e completa o modal **Enviar nota importada (NFS-E)** com observação histórica atualizada, aprovador, anexos e vencimento. Se não houver registro importado correspondente, usa o fluxo normal de `Enviar Nota`.

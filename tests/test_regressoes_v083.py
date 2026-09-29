@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import sys
 import urllib.error
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / "app"
+if str(APP) not in sys.path:
+    sys.path.insert(0, str(APP))
 
 import updater
 

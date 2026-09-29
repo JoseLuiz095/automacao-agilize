@@ -33,6 +33,14 @@ def ordem_pesquisa(preferido: str = "auto", sugerido: str = "nfse") -> list[Tipo
     evolucoes, mas nao participa da pesquisa de CNPJ/rateio.
     """
     primeiro = sugerido if preferido == "auto" else preferido
+
+    # Contas a pagar usa uma semantica de pesquisa diferente da NFS-E.
+    # Quando o destino escolhido/detectado e "documentos", nao caimos em NFS-E
+    # como fallback: isso evita trocar a busca pelo nome do fornecedor por uma
+    # busca de CNPJ e evita reutilizar uma referencia de outra area por engano.
+    if primeiro == "documentos":
+        return [TIPOS["documentos"]]
+
     keys: list[str] = []
     if primeiro in ORDEM_PESQUISA:
         keys.append(primeiro)

@@ -7,5 +7,5 @@ FERRAMENTAS - AUTOMACAO AGILIZE
 04_LIMPAR_BUILD.bat       - remove artefatos de compilacao
 05_GERAR_INSTALADOR.bat   - gera AutomacaoAgilize-Setup.exe
 06_CONFIGURAR_GITHUB.bat  - configura o remote origin
-07_PUBLICAR_VERSAO.bat    - atualiza VERSAO.txt, tag e dispara release
+07_PUBLICAR_VERSAO.bat    - atualiza versao, sincroniza main no GitHub e publica a Release
 08_TESTAR_ATUALIZACAO.bat - consulta Release/VERSAO.txt e mostra o retorno tecnico
