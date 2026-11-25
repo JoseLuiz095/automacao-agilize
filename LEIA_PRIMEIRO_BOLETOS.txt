@@ -1,0 +1,36 @@
+AUTOMACAO AGILIZE - CORRECAO DE LEITURA DE BOLETOS
+
+Base deste pacote: projeto anexado, versao 0.10.5. Este pacote contem
+codigo-fonte para teste; nao e um instalador pronto e nao foi publicado.
+Nao substitua o codigo de uma versao mais recente por este projeto.
+
+O que foi corrigido:
+- leitura da data do documento, do numero do documento e do beneficiario;
+- priorizacao da data expressa como vencimento no boleto;
+- escolha manual da empresa/filial para lancamentos selecionados quando
+  o PDF esconde o CNPJ do pagador;
+- dois boletos diferentes permanecem em lancamentos separados;
+- correcao do arquivo de inicializacao em modo desenvolvimento.
+
+COMO TESTAR NO WINDOWS
+1. Extraia todo o ZIP em uma pasta nova. Nao execute de dentro do ZIP.
+2. Feche a Automacao Agilize caso ja esteja aberta.
+3. Instale Python 3 se necessario; execute FERRAMENTAS\01_EXECUTAR_DEV.bat.
+   Na primeira abertura o script instala as dependencias; pode demorar.
+4. Adicione os PDFs. Eles devem aparecer em dois lancamentos separados.
+5. Selecione na lista somente os lancamentos da mesma empresa/filial,
+   clique em Definir empresa, escolha a filial correta e confirme.
+   Consulte a origem dos documentos para verificar a filial: o CNPJ no
+   boleto esta parcialmente oculto. A escolha vale apenas para esta fila.
+6. Clique em PREPARAR SELECIONADO ou PREPARAR TODOS. Confira empresa,
+   fornecedor, numero, valor, datas, anexos e dados de pagamento no Agilize
+   antes de executar o envio final, que continua manual.
+7. Se ocorrer erro, abra Ver detalhes e use Copiar detalhes para diagnostico.
+
+PARA O EXE INSTALADO
+Este teste em modo desenvolvimento nao atualiza o aplicativo ja instalado.
+Depois de validar, o instalador pode ser gerado no Windows pela ferramenta
+FERRAMENTAS\05_GERAR_INSTALADOR.bat e pelo fluxo existente do projeto.
+Antes de gerar ou publicar uma versao, reconcilie estes ajustes com o
+codigo-fonte da versao efetivamente instalada, se ela for mais recente.
+Nao foi testado o acesso ao Agilize ou o instalador Windows neste ambiente.

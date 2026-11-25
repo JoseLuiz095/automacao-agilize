@@ -11,6 +11,10 @@ if not exist "%PYTHON%" (
   if not exist "%PYTHON%" python -m venv "%VENV%"
 )
 "%PYTHON%" -m pip install -r "%ROOT%\build\requirements.txt"
-if errorlevel 1 pause & exit /b 1
+if errorlevel 1 (
+  echo Falha ao instalar as dependencias.
+  pause
+  exit /b 1
+)
 set "PYTHONPATH=%ROOT%\app"
 "%PYTHON%" "%ROOT%\app\launcher.py"

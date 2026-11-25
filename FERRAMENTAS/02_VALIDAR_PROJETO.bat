@@ -21,6 +21,9 @@ echo ============================================================
 %PY% "%ROOT%\tests\validar_projeto.py"
 if errorlevel 1 goto :falha
 
+%PY% "%ROOT%\tests\test_boletos_empresa_manual.py"
+if errorlevel 1 goto :falha
+
 for %%F in ("%ROOT%\tests\test_regressoes_v*.py") do (
   echo.
   echo Executando %%~nxF

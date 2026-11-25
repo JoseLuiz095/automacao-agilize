@@ -13,7 +13,7 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 from agilize_batch import AgilizeSession, erro_navegador_fechado, erro_recursos_navegador
 from batch import GrupoLancamento, agrupar_documentos
 from browsers import labels_para_combo, label_para_preferencia
-from config import APP_HOME, LOG_DIR
+from config import APP_HOME, LOG_DIR, EMPRESAS
 from credentials import (
     carregar_credenciais,
     remover_credenciais,
@@ -736,6 +736,7 @@ class App(TkinterDnD.Tk):
         actions = tk.Frame(body, bg=self.SURFACE)
         actions.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         ttk.Button(actions, text="Limpar fila", style="Secondary.TButton", command=self._limpar_documentos).pack(side="left")
+        ttk.Button(actions, text="Definir empresa", style="Secondary.TButton", command=self._definir_empresa_selecionados).pack(side="left", padx=(8, 0))
         self.btn_selected = ttk.Button(actions, text="PREPARAR SELECIONADO", style="Secondary.TButton", command=self._preparar_selecionado)
         self.btn_selected.pack(side="right", padx=(8, 0))
         self.btn_processar = ttk.Button(actions, text="PREPARAR TODOS (1 POR VEZ)", style="Accent.TButton", command=self.processar_e_abrir)
@@ -979,22 +980,77 @@ class App(TkinterDnD.Tk):
     def _analisar_fila(self):
         self.btn_processar.configure(state="disabled")
         self.btn_selected.configure(state="disabled")
-        old_status = {g.key: g.status for g in self.grupos}
+        # A chave numerica da fila pode mudar quando novos arquivos sao incluidos.
+        # Conservar escolhas apenas se o conjunto de arquivos for o mesmo.
+        anteriores = {frozenset(g.paths): g for g in self.grupos}
 
         def worker():
             try:
                 grupos = agrupar_documentos(self.pdfs)
                 for g in grupos:
-                    if g.key in old_status and old_status[g.key] in ("Aberto para conferência", "Na fila", "Preparando"):
-                        g.status = old_status[g.key]
+                    anterior = anteriores.get(frozenset(g.paths))
+                    if anterior and anterior.status in ("Aberto para conferência", "Na fila", "Preparando"):
+                        g.status = anterior.status
+                    if anterior and getattr(anterior, "empresa_definida_manualmente", False) and g.dados:
+                        g.dados.company_cnpj = anterior.dados.company_cnpj
+                        g.dados.company_id = anterior.dados.company_id
+                        g.dados.company_name = anterior.dados.company_name
+                        g.empresa_definida_manualmente = True
+                        g.avisos = [a.replace(", empresa.", ".").replace("Dados não identificados: empresa.", "") for a in g.avisos]
+                        g.avisos = [a for a in g.avisos if a]
                 self.grupos = grupos
                 self.grupos_by_key = {g.key: g for g in grupos}
                 self.after(0, self._refresh_queue_tree)
             except Exception as exc:
                 self.log_msg(f"ERRO ao analisar PDFs: {exc}")
-                self.after(0, lambda: messagebox.showerror("Documentos", str(exc)))
+                self.after(0, lambda mensagem=str(exc): messagebox.showerror("Documentos", mensagem))
                 self.after(0, self._sync_document_state)
         threading.Thread(target=worker, daemon=True).start()
+
+    def _definir_empresa_selecionados(self):
+        selecionados = [self.grupos_by_key[k] for k in self.queue_tree.selection() if k in self.grupos_by_key]
+        if not selecionados:
+            messagebox.showinfo("Empresa", "Selecione um ou mais lançamentos na lista.")
+            return
+        if any(not g.dados or g.status in ("Na fila", "Preparando", "Aguardando anterior") for g in selecionados):
+            messagebox.showwarning("Empresa", "Selecione apenas lançamentos com leitura concluída e fora da fila de preparação.")
+            return
+
+        janela = tk.Toplevel(self)
+        janela.title("Definir empresa dos lançamentos")
+        janela.transient(self)
+        janela.grab_set()
+        quadro = ttk.Frame(janela, padding=16)
+        quadro.pack(fill="both", expand=True)
+        ttk.Label(quadro, text=f"Empresa para {len(selecionados)} lançamento(s) selecionado(s):").pack(anchor="w")
+        ttk.Label(quadro, text="Confira a filial no documento ou no cadastro antes de selecionar.").pack(anchor="w", pady=(5, 10))
+        opcoes = sorted((f"{nome} — {cnpj}", cnpj, company_id, nome) for cnpj, (company_id, nome) in EMPRESAS.items())
+        combo = ttk.Combobox(quadro, values=[x[0] for x in opcoes], state="readonly", width=72)
+        combo.pack(fill="x")
+
+        def confirmar():
+            idx = combo.current()
+            if idx < 0:
+                messagebox.showwarning("Empresa", "Selecione a empresa e a filial.", parent=janela)
+                return
+            _, cnpj, company_id, nome = opcoes[idx]
+            for grupo in selecionados:
+                grupo.dados.company_cnpj = cnpj
+                grupo.dados.company_id = company_id
+                grupo.dados.company_name = nome
+                grupo.empresa_definida_manualmente = True
+                grupo.avisos = [a.replace(", empresa.", ".").replace("Dados não identificados: empresa.", "") for a in grupo.avisos]
+                grupo.avisos = [a for a in grupo.avisos if a]
+                if grupo.status == "Revisar dados":
+                    grupo.status = "Pronto"
+            self.log_msg(f"Empresa {nome} ({cnpj}) definida manualmente para {len(selecionados)} lançamento(s); confira antes do envio.")
+            janela.destroy()
+            self._refresh_queue_tree()
+
+        botoes = ttk.Frame(quadro)
+        botoes.pack(fill="x", pady=(14, 0))
+        ttk.Button(botoes, text="Cancelar", command=janela.destroy).pack(side="right")
+        ttk.Button(botoes, text="Confirmar empresa", command=confirmar).pack(side="right", padx=8)
 
     def _refresh_queue_tree(self):
         for item in self.queue_tree.get_children():
@@ -1008,6 +1064,8 @@ class App(TkinterDnD.Tk):
             tipo = label_tipo(grupo.tipo_sugerido)
             numero = grupo.numero or "Sem número"
             status = grupo.status
+            if status == "Pronto" and grupo.dados and (not grupo.dados.company_id or not grupo.dados.provider_cnpj):
+                status = "Revisar dados"
             if len(grupo.documentos) == 1 and status == "Pronto":
                 status = "Pronto · 1 PDF"
             self.queue_tree.insert(

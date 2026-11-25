@@ -82,6 +82,7 @@ class GrupoLancamento:
     tipo_sugerido: str = "nfse"
     avisos: list[str] = field(default_factory=list)
     status: str = "Pronto"
+    empresa_definida_manualmente: bool = False
 
     @property
     def paths(self) -> list[Path]:

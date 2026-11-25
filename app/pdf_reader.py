@@ -291,6 +291,12 @@ def _achar_vencimento_boleto(texto: str) -> str:
     upper = sem_acento(texto).upper()
     if "FICHA DE COMPENSACAO" not in upper and "RECIBO DO PAGADOR" not in upper:
         return ""
+    # Data ligada ao rotulo e mais confiavel que a maior data do documento.
+    explicita = _match_primeiro(texto, [
+        r"\bVENCIMENTO\s*[:\-]?\s*(\d{2}[/-]\d{2}[/-]\d{4})",
+    ])
+    if data_iso(explicita):
+        return data_iso(explicita)
     datas = []
     for parts in DATE_RE.findall(texto):
         try:
@@ -578,6 +584,13 @@ def _achar_nome_provider_recibo(texto: str, provider_cnpj: str) -> str:
         linha = linhas[i]
         if provider_cnpj not in linha and provider_digits not in re.sub(r"\D", "", linha):
             continue
+        # Alguns boletos trazem nome e CNPJ na mesma linha do beneficiario.
+        # Nao percorrer o demonstrativo anterior antes de examinar essa linha.
+        if provider_cnpj in linha:
+            prefixo = linha.split(provider_cnpj, 1)[0]
+            prefixo = re.sub(r"\s*/?\s*(?:CPF/)?CNPJ\s*[:\-]?\s*$", "", prefixo, flags=re.I).strip(" /:-")
+            if _parece_nome_empresa(prefixo):
+                return prefixo[:160]
         for j in range(i - 1, max(-1, i - 26), -1):
             cand = linhas[j].strip()
             if _parece_nome_empresa(cand):
@@ -1012,6 +1025,13 @@ def _achar_pix_chave(texto: str) -> str:
 
 def _achar_pagamento_emissao(texto: str) -> str:
     # Prioriza o bloco do boleto, que geralmente traz Data Emissao em seguida.
+    upper = sem_acento(texto).upper()
+    if "FICHA DE COMPENSACAO" in upper or "RECIBO DO PAGADOR" in upper:
+        data_documento = _match_primeiro(texto, [
+            r"\bDATA\s+DO\s+DOCUMENTO\s*[:\-]?\s*(\d{2}[/-]\d{2}[/-]\d{4})",
+        ])
+        if data_iso(data_documento):
+            return data_iso(data_documento)
     lines = _linhas(texto)
     for i, line in enumerate(lines):
         if sem_acento(line).upper() in {"DATA EMISSAO", "DATA DE EMISSAO"}:
@@ -1032,6 +1052,14 @@ def _achar_numero_documento_pagamento(texto: str) -> str:
     )
     if fatura:
         return fatura
+
+    # Quando o rotulo e o valor estao juntos na ordem de extracao, esse e o
+    # numero do documento; nao o confunda com o Nosso Numero, que tem digito.
+    numero_rotulado = _match_primeiro(texto, [
+        r"\bN[º°o.]\s*(?:do\s+)?documento\s*[:\-]?\s*\n?\s*([0-9][0-9./-]{3,20})(?![0-9./-])",
+    ])
+    if numero_rotulado:
+        return numero_rotulado
 
     # Documentos parcelados como 991483-01 e 76197/1 sao referencias fortes.
     for linha in _linhas(texto):
